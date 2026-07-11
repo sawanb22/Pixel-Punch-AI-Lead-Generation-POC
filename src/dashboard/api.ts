@@ -27,9 +27,21 @@ import {
 import type { MxResolver } from "../validation/email-check.js";
 import type { AuthUser } from "./auth.js";
 import type { ApifyClient } from "../discovery/apify-client.js";
-import { parseLeadFindingConfigFromProjectJson } from "../discovery/lead-finding-config.js";
-import { runLeadFinding } from "../discovery/run-lead-finding.js";
 import { runCompanyEnrichment } from "../enrichment/run-company-enrichment.js";
+import {
+  ensureLeadPlan,
+  runOneClickLeadFinding,
+} from "../discovery/one-click-lead-finding.js";
+import {
+  parseLeadPlan,
+  serializeLeadPlan,
+} from "../discovery/lead-plan.js";
+import { HermesLeadPlanner } from "../discovery/hermes-lead-planner.js";
+import {
+  getLatestDiscoveryRunForProject,
+  listSourceJobs,
+  listDiscoveredCandidates,
+} from "../discovery/discovery.repo.js";
 
 export interface ApiOptions {
   db: DB;
@@ -46,6 +58,8 @@ export interface ApiOptions {
   createConfiguredSourcesFn?: typeof createConfiguredSources;
   /** Injectable Apify client for lead finding (tests). */
   apifyClient?: ApifyClient;
+  /** Injectable Hermes lead planner (tests). */
+  leadPlanner?: HermesLeadPlanner;
 }
 
 const upload = multer({ storage: multer.memoryStorage() });
@@ -107,6 +121,7 @@ export function createApiRouter(options: ApiOptions): Router {
     ingestEnv,
     createConfiguredSourcesFn = createConfiguredSources,
     apifyClient,
+    leadPlanner,
   } = options;
   const router = Router();
 
@@ -119,9 +134,10 @@ export function createApiRouter(options: ApiOptions): Router {
     res.json(listProjects(db));
   });
 
-  router.post("/projects", (req, res) => {
+  router.post("/projects", async (req, res) => {
     try {
-      const { name, website, description, icp, sourceConfig } = req.body ?? {};
+      const { name, website, description, icp, sourceConfig, geography, volumeTarget } =
+        req.body ?? {};
       if (!name || typeof name !== "string") {
         res.status(400).json({ error: "name is required" });
         return;
@@ -131,19 +147,29 @@ export function createApiRouter(options: ApiOptions): Router {
         website: website ?? null,
         description: description ?? null,
         icp: icp ?? null,
-        sourceConfig: serializeSourceConfig(sourceConfig),
+        sourceConfig: sourceConfig
+          ? serializeSourceConfig(sourceConfig)
+          : null,
       });
-      res.status(201).json(project);
+
+      await ensureLeadPlan(db, project, {
+        geography: typeof geography === "string" ? geography : null,
+        volumeTarget: typeof volumeTarget === "number" ? volumeTarget : 100,
+        planner: leadPlanner,
+        fetch: ingestFetch,
+      });
+      res.status(201).json(getProject(db, project.id));
     } catch (err) {
       const message = err instanceof Error ? err.message : "invalid request";
       res.status(400).json({ error: message });
     }
   });
 
-  router.patch("/projects/:id", (req, res) => {
+  router.patch("/projects/:id", async (req, res) => {
     try {
       const id = projectIdParam(req);
-      if (!getProject(db, id)) {
+      const existing = getProject(db, id);
+      if (!existing) {
         res.status(404).json({ error: "project not found" });
         return;
       }
@@ -163,7 +189,30 @@ export function createApiRouter(options: ApiOptions): Router {
       if (body.sourceConfig !== undefined) {
         input.sourceConfig = serializeSourceConfig(body.sourceConfig);
       }
-      const project = updateProject(db, id, input);
+
+      let project = updateProject(db, id, input)!;
+
+      if (
+        body.volumeTarget !== undefined ||
+        body.geography !== undefined ||
+        body.regeneratePlan === true
+      ) {
+        const { plan } = await ensureLeadPlan(db, project, {
+          volumeTarget:
+            typeof body.volumeTarget === "number"
+              ? body.volumeTarget
+              : undefined,
+          geography:
+            typeof body.geography === "string" ? body.geography : undefined,
+          forceRegenerate: body.regeneratePlan === true,
+          planner: leadPlanner,
+          fetch: ingestFetch,
+        });
+        project = updateProject(db, id, {
+          leadPlan: serializeLeadPlan({ ...plan, status: "approved" }),
+        })!;
+      }
+
       res.json(project);
     } catch (err) {
       const message = err instanceof Error ? err.message : "invalid request";
@@ -282,57 +331,143 @@ export function createApiRouter(options: ApiOptions): Router {
         return;
       }
 
-      const leadFinding = parseLeadFindingConfigFromProjectJson(
-        project.sourceConfig
-      );
-      const useLeadFinding =
-        leadFinding.sources.length > 0 || Boolean(leadFinding.pack);
-
-      if (useLeadFinding) {
-        try {
-          const summary = await runLeadFinding(db, id, {
-            apifyClient,
-            env: ingestEnv,
-            concurrency: leadFinding.concurrency,
-          });
-          res.status(201).json(summary);
-        } catch (err) {
-          const message =
-            err instanceof Error ? err.message : "lead finding failed";
-          res.status(400).json({ error: message });
-        }
-        return;
-      }
-
-      const configureOpts: CreateConfiguredSourcesOptions = {};
-      if (ingestFetch) configureOpts.fetch = ingestFetch;
-      if (ingestEnv) configureOpts.env = ingestEnv;
-
-      let configured;
       try {
-        configured = createConfiguredSourcesFn(project, configureOpts);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : "invalid sources";
-        res.status(400).json({ error: message });
-        return;
-      }
-      if (configured.sources.length === 0) {
-        res.status(400).json({
-          error:
-            "No sources configured. Add leadFinding.sources (Apify) or enable Product Hunt / Jina in Project settings.",
+        const summary = await runOneClickLeadFinding(db, id, {
+          apifyClient,
+          env: ingestEnv,
+          fetch: ingestFetch,
+          planner: leadPlanner,
+          volumeTarget:
+            typeof req.body?.volumeTarget === "number"
+              ? req.body.volumeTarget
+              : undefined,
+          geography:
+            typeof req.body?.geography === "string"
+              ? req.body.geography
+              : undefined,
         });
-        return;
+        res.status(201).json(summary);
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "lead finding failed";
+        res.status(400).json({ error: message });
       }
-
-      const summary = await runIngest(db, id, configured.sources, {
-        resolver: mxResolver,
-        enrichWebsites: configured.enrich,
-        fetch: ingestFetch,
-      });
-      res.status(201).json(summary);
     } catch (err) {
       next(err);
     }
+  });
+
+  router.get("/projects/:id/lead-plan", (req, res) => {
+    const project = getProject(db, projectIdParam(req));
+    if (!project) {
+      res.status(404).json({ error: "project not found" });
+      return;
+    }
+    res.json({ plan: parseLeadPlan(project.leadPlan) });
+  });
+
+  router.post("/projects/:id/lead-plan/generate", async (req, res) => {
+    try {
+      const id = projectIdParam(req);
+      const project = getProject(db, id);
+      if (!project) {
+        res.status(404).json({ error: "project not found" });
+        return;
+      }
+      const { plan, fromFallback } = await ensureLeadPlan(db, project, {
+        forceRegenerate: true,
+        volumeTarget:
+          typeof req.body?.volumeTarget === "number"
+            ? req.body.volumeTarget
+            : undefined,
+        geography:
+          typeof req.body?.geography === "string" ? req.body.geography : null,
+        feedbackNotes:
+          typeof req.body?.feedback === "string" ? req.body.feedback : null,
+        planner: leadPlanner,
+        fetch: ingestFetch,
+      });
+      const saved = updateProject(db, id, {
+        leadPlan: serializeLeadPlan({ ...plan, status: "draft" }),
+      });
+      res.json({ plan: parseLeadPlan(saved!.leadPlan), fromFallback });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "plan generate failed";
+      res.status(400).json({ error: message });
+    }
+  });
+
+  router.post("/projects/:id/lead-plan/feedback", async (req, res) => {
+    try {
+      const id = projectIdParam(req);
+      const project = getProject(db, id);
+      if (!project) {
+        res.status(404).json({ error: "project not found" });
+        return;
+      }
+      const feedback =
+        typeof req.body?.feedback === "string" ? req.body.feedback.trim() : "";
+      if (!feedback) {
+        res.status(400).json({ error: "feedback is required" });
+        return;
+      }
+      const { plan, fromFallback } = await ensureLeadPlan(db, project, {
+        forceRegenerate: true,
+        feedbackNotes: feedback,
+        planner: leadPlanner,
+        fetch: ingestFetch,
+      });
+      const saved = updateProject(db, id, {
+        leadPlan: serializeLeadPlan({
+          ...plan,
+          status: "draft",
+          feedbackNotes: feedback,
+        }),
+      });
+      res.json({ plan: parseLeadPlan(saved!.leadPlan), fromFallback });
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "plan feedback failed";
+      res.status(400).json({ error: message });
+    }
+  });
+
+  router.get("/projects/:id/discovery/latest", (req, res) => {
+    const id = projectIdParam(req);
+    if (!getProject(db, id)) {
+      res.status(404).json({ error: "project not found" });
+      return;
+    }
+    const run = getLatestDiscoveryRunForProject(db, id);
+    if (!run) {
+      res.json({ run: null, jobs: [], rejectedSamples: [], timeline: [] });
+      return;
+    }
+    const jobs = listSourceJobs(db, run.id);
+    const rejected = listDiscoveredCandidates(db, run.id, { kept: false }).slice(
+      0,
+      12
+    );
+    const timeline = [
+      `Run #${run.id} ${run.status}`,
+      `Fetched ${run.fetchedCount}, kept ${run.keptCount}, rejected ${run.rejectedCount}, duplicates ${run.duplicateCount}`,
+      ...jobs.map(
+        (j) =>
+          `${j.sourceId}: ${j.status}` +
+          (j.error ? ` — ${j.error}` : ` (fetched ${j.fetchedCount})`)
+      ),
+    ];
+    res.json({
+      run,
+      jobs,
+      rejectedSamples: rejected.map((c) => ({
+        company: c.company,
+        website: c.website,
+        reason: c.rejectionReason,
+        source: c.source,
+      })),
+      timeline,
+    });
   });
 
   router.post("/projects/:id/enrich-companies", async (req, res, next) => {

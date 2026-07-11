@@ -159,6 +159,21 @@ export function getDiscoveryRun(db: DB, id: number): DiscoveryRun | undefined {
   return row ? toRun(row) : undefined;
 }
 
+export function getLatestDiscoveryRunForProject(
+  db: DB,
+  projectId: number
+): DiscoveryRun | undefined {
+  const row = db
+    .prepare(
+      `SELECT * FROM discovery_runs
+       WHERE project_id = ?
+       ORDER BY id DESC
+       LIMIT 1`
+    )
+    .get(projectId) as DiscoveryRunRow | undefined;
+  return row ? toRun(row) : undefined;
+}
+
 export interface UpdateDiscoveryRunInput {
   status?: DiscoveryRunStatus;
   fetchedCount?: number;

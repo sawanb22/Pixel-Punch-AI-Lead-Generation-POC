@@ -7,6 +7,7 @@ export interface NewProject {
   description?: string | null;
   icp?: string | null;
   sourceConfig?: string | null;
+  leadPlan?: string | null;
 }
 
 interface ProjectRow {
@@ -16,6 +17,7 @@ interface ProjectRow {
   description: string | null;
   icp: string | null;
   source_config: string | null;
+  lead_plan?: string | null;
   status: string;
   created_at: string;
 }
@@ -28,6 +30,7 @@ function toProject(row: ProjectRow): Project {
     description: row.description,
     icp: row.icp,
     sourceConfig: row.source_config,
+    leadPlan: row.lead_plan ?? null,
     status: row.status,
     createdAt: row.created_at,
   };
@@ -36,15 +39,16 @@ function toProject(row: ProjectRow): Project {
 export function createProject(db: DB, input: NewProject): Project {
   const result = db
     .prepare(
-      `INSERT INTO projects (name, website, description, icp, source_config)
-       VALUES (?, ?, ?, ?, ?)`
+      `INSERT INTO projects (name, website, description, icp, source_config, lead_plan)
+       VALUES (?, ?, ?, ?, ?, ?)`
     )
     .run(
       input.name,
       input.website ?? null,
       input.description ?? null,
       input.icp ?? null,
-      input.sourceConfig ?? null
+      input.sourceConfig ?? null,
+      input.leadPlan ?? null
     );
   return getProject(db, Number(result.lastInsertRowid))!;
 }
@@ -69,6 +73,7 @@ export interface UpdateProjectInput {
   description?: string | null;
   icp?: string | null;
   sourceConfig?: string | null;
+  leadPlan?: string | null;
 }
 
 export function updateProject(
@@ -81,7 +86,7 @@ export function updateProject(
 
   db.prepare(
     `UPDATE projects
-     SET name = ?, website = ?, description = ?, icp = ?, source_config = ?
+     SET name = ?, website = ?, description = ?, icp = ?, source_config = ?, lead_plan = ?
      WHERE id = ?`
   ).run(
     input.name !== undefined ? input.name : existing.name,
@@ -91,6 +96,7 @@ export function updateProject(
     input.sourceConfig !== undefined
       ? input.sourceConfig
       : existing.sourceConfig,
+    input.leadPlan !== undefined ? input.leadPlan : existing.leadPlan,
     id
   );
   return getProject(db, id);

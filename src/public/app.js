@@ -123,62 +123,33 @@ function updateResultCount() {
   $("result-count").textContent = `${n} lead${n === 1 ? "" : "s"}`;
 }
 
-const DEFAULT_JINA_QUERY =
-  "B2B SaaS AI data analytics OR decision intelligence product startup";
+const VOLUME_STEPS = [25, 50, 100, 250, 500, 1000, 2000];
 
-function parseProjectSourceConfig(raw) {
-  if (!raw) return {};
+function parseLeadPlanJson(raw) {
+  if (!raw) return null;
   try {
     return typeof raw === "string" ? JSON.parse(raw) : raw;
   } catch {
-    return {};
+    return null;
   }
 }
 
-function sourceConfigFromForm(form) {
-  const fd = new FormData(form);
-  const phEnabled = fd.get("ph_enabled") === "on";
-  const jinaEnabled = fd.get("jina_enabled") === "on";
-  const enrich = fd.get("enrich") === "on";
-  const jinaQuery = String(fd.get("jina_query") || "").trim();
-  const advancedRaw = String(fd.get("source_config_json") || "").trim();
-
-  let cfg = {};
-  if (advancedRaw) {
-    try {
-      const parsed = JSON.parse(advancedRaw);
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-        throw new Error("Advanced source config must be a JSON object");
-      }
-      cfg = { ...parsed };
-    } catch (err) {
-      throw new Error(
-        err instanceof Error
-          ? `Invalid advanced source config JSON: ${err.message}`
-          : "Invalid advanced source config JSON"
-      );
+function clampVolume(n) {
+  const num = Number(n);
+  if (!Number.isFinite(num) || num <= 0) return 100;
+  let best = VOLUME_STEPS[0];
+  let bestDist = Math.abs(num - best);
+  for (const step of VOLUME_STEPS) {
+    const dist = Math.abs(num - step);
+    if (dist < bestDist) {
+      best = step;
+      bestDist = dist;
     }
   }
-
-  if (phEnabled) cfg.producthunt = { enabled: true, first: 20 };
-  else delete cfg.producthunt;
-
-  if (jinaEnabled) {
-    cfg.jina = {
-      enabled: true,
-      query: jinaQuery || DEFAULT_JINA_QUERY,
-      num: 10,
-    };
-  } else delete cfg.jina;
-
-  if (enrich && (phEnabled || jinaEnabled)) cfg.enrich = true;
-  else delete cfg.enrich;
-
-  return Object.keys(cfg).length ? cfg : null;
+  return best;
 }
 
-function fillSourceFields(form, project) {
-  const cfg = parseProjectSourceConfig(project?.sourceConfig);
+function fillProjectFields(form, project) {
   form.elements.namedItem("name").value = project?.name || "";
   const website = form.elements.namedItem("website");
   if (website) website.value = project?.website || "";
@@ -186,24 +157,107 @@ function fillSourceFields(form, project) {
   if (description) description.value = project?.description || "";
   const icp = form.elements.namedItem("icp");
   if (icp) icp.value = project?.icp || "";
-  const ph = form.elements.namedItem("ph_enabled");
-  if (ph) ph.checked = !!(cfg.producthunt && cfg.producthunt.enabled !== false);
-  const jina = form.elements.namedItem("jina_enabled");
-  if (jina) jina.checked = !!(cfg.jina && cfg.jina.enabled !== false);
-  const jq = form.elements.namedItem("jina_query");
-  if (jq) jq.value = (cfg.jina && cfg.jina.query) || DEFAULT_JINA_QUERY;
-  const enrich = form.elements.namedItem("enrich");
-  if (enrich) enrich.checked = cfg.enrich === true;
+  const plan = parseLeadPlanJson(project?.leadPlan);
+  const geography = form.elements.namedItem("geography");
+  if (geography) geography.value = plan?.geography || "";
+  const volume = form.elements.namedItem("volumeTarget");
+  if (volume) volume.value = String(clampVolume(plan?.volumeTarget ?? 100));
+}
 
-  const advanced = form.elements.namedItem("source_config_json");
-  if (advanced) {
-    const { producthunt: _ph, jina: _jina, enrich: _en, ...rest } = cfg;
-    advanced.value = Object.keys(rest).length
-      ? JSON.stringify(rest, null, 2)
-      : "";
+function setPlanControlsEnabled(on) {
+  $("btn-regen-plan").disabled = !on;
+  $("btn-plan-feedback").disabled = !on;
+  $("lead-plan-feedback").disabled = !on;
+  $("btn-refresh-activity").disabled = !on;
+}
+
+function renderLeadPlan(plan) {
+  const status = $("lead-plan-status");
+  const goal = $("lead-plan-goal");
+  const meta = $("lead-plan-meta");
+  const angles = $("lead-plan-angles");
+  if (!plan) {
+    status.textContent = "—";
+    goal.textContent = currentProjectId
+      ? "No lead plan yet. Click Regenerate plan or Find leads."
+      : "Create or open a project to draft a plan.";
+    meta.innerHTML = "";
+    angles.innerHTML = "";
+    return;
+  }
+  status.textContent = `${plan.status} · ${plan.generatedBy}`;
+  goal.textContent = plan.goal || "—";
+  meta.innerHTML = `
+    <div><dt>Volume</dt><dd>${escapeHtml(String(plan.volumeTarget ?? "—"))}</dd></div>
+    <div><dt>Geography</dt><dd>${escapeHtml(plan.geography || "Any")}</dd></div>
+    <div><dt>Intents</dt><dd>${escapeHtml((plan.intents || []).join(", ") || "—")}</dd></div>
+  `;
+  angles.innerHTML = (plan.searchAngles || [])
+    .map((q) => `<li>${escapeHtml(q)}</li>`)
+    .join("");
+}
+
+function renderActivity(payload) {
+  const summary = $("activity-summary");
+  const timeline = $("activity-timeline");
+  const rejected = $("activity-rejected");
+  if (!payload?.run) {
+    summary.textContent = "No discovery runs yet.";
+    timeline.innerHTML = "";
+    rejected.classList.add("hidden");
+    rejected.innerHTML = "";
+    return;
+  }
+  const run = payload.run;
+  summary.textContent = `Run #${run.id} · ${run.status} · fetched ${run.fetchedCount}, kept ${run.keptCount}, rejected ${run.rejectedCount}, duplicates ${run.duplicateCount}`;
+  timeline.innerHTML = (payload.timeline || [])
+    .map((line) => `<li>${escapeHtml(line)}</li>`)
+    .join("");
+  const samples = payload.rejectedSamples || [];
+  if (!samples.length) {
+    rejected.classList.add("hidden");
+    rejected.innerHTML = "";
+    return;
+  }
+  rejected.classList.remove("hidden");
+  rejected.innerHTML = `<p class="muted">Rejected samples</p><ul>${samples
+    .map(
+      (s) =>
+        `<li>${escapeHtml(s.company || s.website || "—")}${
+          s.reason ? ` — ${escapeHtml(s.reason)}` : ""
+        }</li>`
+    )
+    .join("")}</ul>`;
+}
+
+async function loadLeadPlan() {
+  if (!currentProjectId) {
+    setPlanControlsEnabled(false);
+    renderLeadPlan(null);
+    return;
+  }
+  setPlanControlsEnabled(true);
+  try {
+    const data = await api(`/api/projects/${currentProjectId}/lead-plan`);
+    renderLeadPlan(data.plan);
+  } catch (err) {
+    renderLeadPlan(null);
+    toast(err.message || String(err), "error");
   }
 }
 
+async function loadActivity() {
+  if (!currentProjectId) {
+    renderActivity(null);
+    return;
+  }
+  try {
+    const data = await api(`/api/projects/${currentProjectId}/discovery/latest`);
+    renderActivity(data);
+  } catch (err) {
+    renderActivity(null);
+  }
+}
 
 function openNewProjectDialog() {
   const backdrop = $("new-project-backdrop");
@@ -211,10 +265,7 @@ function openNewProjectDialog() {
   backdrop.removeAttribute("inert");
   const form = $("new-project-form");
   form.reset();
-  form.elements.namedItem("ph_enabled").checked = true;
-  form.elements.namedItem("jina_enabled").checked = true;
-  form.elements.namedItem("enrich").checked = true;
-  form.elements.namedItem("jina_query").value = DEFAULT_JINA_QUERY;
+  form.elements.namedItem("volumeTarget").value = "100";
   form.querySelector('input[name="name"]')?.focus();
 }
 
@@ -234,7 +285,7 @@ async function openSettingsDialog() {
     const project = await api(`/api/projects/${currentProjectId}`);
     const idx = projects.findIndex((p) => p.id === project.id);
     if (idx >= 0) projects[idx] = project;
-    fillSourceFields($("settings-form"), project);
+    fillProjectFields($("settings-form"), project);
     const backdrop = $("settings-backdrop");
     backdrop.classList.add("open");
     backdrop.removeAttribute("inert");
@@ -274,6 +325,9 @@ async function loadProjects() {
   if (!projects.length) {
     currentProjectId = null;
     updateBrandProject();
+    setPlanControlsEnabled(false);
+    renderLeadPlan(null);
+    renderActivity(null);
     return;
   }
   if (!currentProjectId || !projects.some((p) => p.id === currentProjectId)) {
@@ -330,7 +384,7 @@ function renderLeads() {
       $("filter-q").value.trim();
     empty.textContent = hasFilters
       ? "No leads match these filters."
-      : "No leads yet. Open Project settings, then click Find leads.";
+      : "No leads yet. Click Find leads to run Apify discovery.";
     empty.classList.remove("hidden");
     updateResultCount();
     return;
@@ -476,6 +530,8 @@ async function refreshAll() {
   await loadProjects();
   await loadStats();
   await loadLeads();
+  await loadLeadPlan();
+  await loadActivity();
 }
 
 async function approveSelected() {
@@ -525,6 +581,8 @@ $("project-select").addEventListener("change", async (e) => {
   updateBrandProject();
   await loadStats();
   await loadLeads();
+  await loadLeadPlan();
+  await loadActivity();
 });
 
 $("btn-new-project").addEventListener("click", openNewProjectDialog);
@@ -547,7 +605,8 @@ $("new-project-form").addEventListener("submit", async (e) => {
   const website = String(fd.get("website") || "").trim();
   const description = String(fd.get("description") || "").trim();
   const icp = String(fd.get("icp") || "").trim();
-  const sourceConfig = sourceConfigFromForm(form);
+  const geography = String(fd.get("geography") || "").trim();
+  const volumeTarget = clampVolume(fd.get("volumeTarget"));
   try {
     const created = await api("/api/projects", {
       method: "POST",
@@ -556,7 +615,8 @@ $("new-project-form").addEventListener("submit", async (e) => {
         website: website || null,
         description: description || null,
         icp: icp || null,
-        sourceConfig,
+        geography: geography || null,
+        volumeTarget,
       }),
     });
     closeNewProjectDialog();
@@ -575,6 +635,8 @@ $("settings-form").addEventListener("submit", async (e) => {
   const fd = new FormData(form);
   const name = String(fd.get("name") || "").trim();
   if (!name) return;
+  const geography = String(fd.get("geography") || "").trim();
+  const volumeTarget = clampVolume(fd.get("volumeTarget"));
   try {
     const updated = await api(`/api/projects/${currentProjectId}`, {
       method: "PATCH",
@@ -583,7 +645,8 @@ $("settings-form").addEventListener("submit", async (e) => {
         website: String(fd.get("website") || "").trim() || null,
         description: String(fd.get("description") || "").trim() || null,
         icp: String(fd.get("icp") || "").trim() || null,
-        sourceConfig: sourceConfigFromForm(form),
+        geography: geography || null,
+        volumeTarget,
       }),
     });
     closeSettingsDialog();
@@ -594,6 +657,7 @@ $("settings-form").addEventListener("submit", async (e) => {
     const sel = $("project-select");
     const opt = [...sel.options].find((o) => Number(o.value) === updated.id);
     if (opt) opt.textContent = `${updated.name} (#${updated.id})`;
+    await loadLeadPlan();
     toast("Project settings saved", "success");
   } catch (err) {
     toast(err.message || String(err), "error");
@@ -615,13 +679,15 @@ $("btn-find-leads").addEventListener("click", async () => {
   const btn = $("btn-find-leads");
   btn.disabled = true;
   try {
-    toast("Finding leads…");
+    toast("Finding leads via Apify…");
     const summary = await api(`/api/projects/${currentProjectId}/ingest`, {
       method: "POST",
       body: "{}",
     });
     await loadStats();
     await loadLeads();
+    await loadLeadPlan();
+    await loadActivity();
     const skip = summary.skippedExisting
       ? `, skipped ${summary.skippedExisting}`
       : "";
@@ -639,9 +705,62 @@ $("btn-find-leads").addEventListener("click", async () => {
     );
   } catch (err) {
     toast(err.message || String(err), "error");
+    await loadActivity();
   } finally {
     btn.disabled = false;
   }
+});
+
+$("btn-regen-plan").addEventListener("click", async () => {
+  if (!currentProjectId) return;
+  const btn = $("btn-regen-plan");
+  btn.disabled = true;
+  try {
+    toast("Generating lead plan…");
+    const data = await api(`/api/projects/${currentProjectId}/lead-plan/generate`, {
+      method: "POST",
+      body: "{}",
+    });
+    renderLeadPlan(data.plan);
+    toast(
+      data.fromFallback
+        ? "Used fallback plan (Hermes unavailable)"
+        : "Lead plan regenerated",
+      "success"
+    );
+  } catch (err) {
+    toast(err.message || String(err), "error");
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+$("btn-plan-feedback").addEventListener("click", async () => {
+  if (!currentProjectId) return;
+  const feedback = $("lead-plan-feedback").value.trim();
+  if (!feedback) {
+    toast("Enter feedback first", "error");
+    return;
+  }
+  const btn = $("btn-plan-feedback");
+  btn.disabled = true;
+  try {
+    const data = await api(`/api/projects/${currentProjectId}/lead-plan/feedback`, {
+      method: "POST",
+      body: JSON.stringify({ feedback }),
+    });
+    renderLeadPlan(data.plan);
+    $("lead-plan-feedback").value = "";
+    toast("Plan updated from feedback", "success");
+  } catch (err) {
+    toast(err.message || String(err), "error");
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+$("btn-refresh-activity").addEventListener("click", () => {
+  loadActivity().catch((err) => toast(err.message || String(err), "error"));
 });
 
 $("btn-enrich-companies").addEventListener("click", async () => {

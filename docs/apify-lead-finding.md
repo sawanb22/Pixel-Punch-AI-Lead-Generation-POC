@@ -1,6 +1,22 @@
 # Apify lead finding
 
-Lead finding discovers **company name + website/domain** candidates before enrichment or Hermes scoring. Apify is the primary acquisition engine; Product Hunt, Jina, Google CSE, and CSV remain available as legacy adapters.
+Lead finding discovers **company name + website/domain** candidates. The dashboard **Find leads** path is **Apify-only**: Hermes (or a deterministic fallback) drafts a human-readable **lead plan**, and LeadRadar compiles that plan into Apify actor jobs. No Product Hunt / Jina / Google CSE on that path.
+
+## One-click flow (recommended)
+
+1. Set `APIFY_TOKEN` in `.env`.
+2. Create a project with plain-English ICP + optional geography + volume (25–2000).
+3. Optional: regenerate plan or send feedback (`POST /api/projects/:id/lead-plan/...`).
+4. Click **Find leads** (`POST /api/projects/:id/ingest`) — uses the stored plan, not user JSON.
+5. Inspect Activity via `GET /api/projects/:id/discovery/latest`.
+
+Planner env (isolated from scoring):
+
+```text
+HERMES_PLAN_MODEL=hermes-lead-planner
+HERMES_PLAN_API_BASE=   # optional; defaults to HERMES_API_BASE
+HERMES_PLAN_API_KEY=    # optional; defaults to HERMES_API_KEY
+```
 
 ## Environment
 
@@ -11,9 +27,11 @@ LEADFINDING_MAX_CANDIDATES=500
 LEADFINDING_MAX_APIFY_JOBS=10
 ```
 
-`APIFY_TOKEN` is required whenever a project’s `source_config.leadFinding` lists Apify sources (or a pack). Missing token returns a clear `400` from **Find leads**.
+`APIFY_TOKEN` is required for **Find leads**. Missing token returns a clear `400`.
 
-## Project `source_config.leadFinding`
+## Advanced: project `source_config.leadFinding`
+
+Legacy / scripted runs can still pass explicit Apify sources in `source_config` (not shown in the dashboard UI):
 
 ```json
 {
@@ -89,18 +107,19 @@ Query templates support `{{niche}}`, `{{category}}`, `{{city}}`, and `{{role}}`.
 
 Dashboard **Find leads** (`POST /api/projects/:id/ingest`):
 
-1. If `leadFinding.sources` or `leadFinding.pack` is set → run Apify-first discovery.
-2. Otherwise → legacy Product Hunt / Jina / Google adapters.
+1. Ensure / load the project **lead plan**.
+2. Compile plan → Apify jobs (Google search + Maps templates).
+3. Run discovery; write `discovery_runs` / jobs / candidates; insert kept leads.
 
 Discovery response includes:
 
-- `runId`, `sourcesRun`, `fetched`, `kept`, `rejected`, `duplicates`, `skippedExisting`, `costEstimate`, `errors[]`
+- `runId`, `plan`, `sourcesRun`, `fetched`, `kept`, `rejected`, `duplicates`, `skippedExisting`, `costEstimate`, `errors[]`
 
 One failed Apify job does not fail the whole run; its error is recorded in `errors` and `discovery_source_jobs`.
 
 ## Guardrails
 
-- Default max candidates: `500`
+- Volume steps: `25 / 50 / 100 / 250 / 500 / 1000 / 2000`
 - Default max Apify jobs: `10`
 - Default concurrency: `2`
 - Default actor timeout: `10 minutes`
@@ -111,8 +130,8 @@ One failed Apify job does not fail the whole run; its error is recorded in `erro
 ## Adding a new Apify actor
 
 1. Confirm the actor/task in Apify Console and note sample dataset fields.
-2. Add a `leadFinding.sources[]` entry with `actorId` or `taskId`, `input`, and `mapping`.
-3. Click **Find leads** and inspect `discovery_runs` / `discovered_candidates` if mapping looks wrong.
+2. Extend `compile-lead-plan.ts` (preferred) or add a `leadFinding.sources[]` entry for scripts.
+3. Click **Find leads** and inspect Activity / `discovery_runs` if mapping looks wrong.
 4. Tighten `input` limits (`maxItems`, places per search) before raising budgets.
 
 ## Official Apify references

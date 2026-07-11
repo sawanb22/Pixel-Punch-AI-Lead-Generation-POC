@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS projects (
   description TEXT,
   icp TEXT,
   source_config TEXT,
+  lead_plan TEXT,
   status TEXT NOT NULL DEFAULT 'active',
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

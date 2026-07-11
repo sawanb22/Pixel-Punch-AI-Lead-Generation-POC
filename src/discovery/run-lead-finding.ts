@@ -38,6 +38,9 @@ export interface RunLeadFindingOptions {
   env?: NodeJS.ProcessEnv;
   concurrency?: number;
   now?: () => string;
+  /** When set, use these Apify jobs instead of parsing source_config. */
+  jobs?: LeadFindingSourceConfig[];
+  maxCandidates?: number;
 }
 
 function toCanonicalLead(c: DiscoveredCompanyCandidate): CanonicalLead {
@@ -84,14 +87,21 @@ export async function runLeadFinding(
 
   const env = options.env ?? process.env;
   const config = parseLeadFindingConfigFromProjectJson(project.sourceConfig);
-  const jobs = resolveLeadFindingJobs({ project, env, config });
+  const jobs =
+    options.jobs ?? resolveLeadFindingJobs({ project, env, config });
   const concurrency = options.concurrency ?? config.concurrency;
+  const maxCandidates = options.maxCandidates ?? config.maxCandidates;
   const now = options.now ?? (() => new Date().toISOString());
 
   const apifyJobs = jobs.filter((j) => j.type === "apify");
-  if (apifyJobs.length > 0 && !options.apifyClient && !env.APIFY_TOKEN?.trim()) {
+  if (apifyJobs.length === 0) {
     throw new Error(
-      "APIFY_TOKEN is required for Apify lead finding sources. Set APIFY_TOKEN or remove apify sources from leadFinding config."
+      "No Apify lead-finding jobs. Add a lead plan or configure Apify sources."
+    );
+  }
+  if (!options.apifyClient && !env.APIFY_TOKEN?.trim()) {
+    throw new Error(
+      "APIFY_TOKEN is required for Find leads. Set APIFY_TOKEN in .env."
     );
   }
 
@@ -169,7 +179,7 @@ export async function runLeadFinding(
   });
 
   const { kept: deduped, duplicates } = dedupeCandidates(allCandidates);
-  const capped = deduped.slice(0, config.maxCandidates);
+  const capped = deduped.slice(0, maxCandidates);
 
   insertDiscoveredCandidates(db, [
     ...capped.map((c) => ({

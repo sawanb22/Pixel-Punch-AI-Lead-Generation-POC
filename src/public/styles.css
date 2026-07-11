@@ -411,6 +411,152 @@ button.bad {
 
 .ops-spacer { flex: 1; min-width: 0.5rem; }
 
+.more-ops {
+  position: relative;
+}
+
+.more-ops > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 0.45rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.more-ops > summary::-webkit-details-marker {
+  display: none;
+}
+
+.more-ops-panel {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 11rem;
+  padding: 0.5rem;
+  background: var(--panel-elevated);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.plan-activity {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  padding: 0 1.25rem 0.25rem;
+  animation: rise-in 0.35s ease both;
+}
+
+.panel-card {
+  background: var(--panel-elevated);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 1rem 1.1rem;
+  min-width: 0;
+}
+
+.panel-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.panel-card-head h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.panel-card .tiny {
+  padding: 0.2rem 0.5rem;
+  font-size: 0.75rem;
+}
+
+.plan-goal {
+  margin: 0 0 0.75rem;
+  line-height: 1.45;
+}
+
+.plan-meta {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0 0 0.75rem;
+  font-size: 0.85rem;
+}
+
+.plan-meta > div {
+  display: grid;
+  grid-template-columns: 5.5rem 1fr;
+  gap: 0.5rem;
+}
+
+.plan-meta dt {
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.plan-meta dd {
+  margin: 0;
+}
+
+.plan-angles {
+  margin: 0 0 0.75rem;
+  padding-left: 1.1rem;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  max-height: 8rem;
+  overflow: auto;
+}
+
+.plan-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.65rem;
+}
+
+.plan-feedback {
+  display: grid;
+  gap: 0.35rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.plan-feedback textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 3rem;
+}
+
+.activity-timeline {
+  margin: 0.5rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  max-height: 12rem;
+  overflow: auto;
+}
+
+.activity-rejected {
+  margin-top: 0.75rem;
+  font-size: 0.82rem;
+}
+
+.activity-rejected ul {
+  margin: 0.35rem 0 0;
+  padding-left: 1.1rem;
+}
+
 .shortcut-hint-btn {
   font-size: 0.8rem;
   color: var(--muted);
@@ -983,6 +1129,7 @@ html[data-theme="dark"] .pill-scored {
 @media (max-width: 900px) {
   .kpis { grid-template-columns: repeat(2, 1fr); }
   .main { grid-template-columns: 1fr; }
+  .plan-activity { grid-template-columns: 1fr; }
   .detail { position: static; }
   .filters .result-count {
     margin-left: 0;

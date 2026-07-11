@@ -24,6 +24,7 @@ export interface CreateAppOptions {
   ingestEnv?: ApiOptions["ingestEnv"];
   createConfiguredSourcesFn?: ApiOptions["createConfiguredSourcesFn"];
   apifyClient?: ApiOptions["apifyClient"];
+  leadPlanner?: ApiOptions["leadPlanner"];
 }
 
 export function resolveScorer(override?: Scorer): Scorer {
@@ -52,6 +53,7 @@ export function createApp(options: CreateAppOptions): Express {
     ingestEnv,
     createConfiguredSourcesFn,
     apifyClient,
+    leadPlanner,
   } = options;
 
   const app = express();
@@ -86,6 +88,7 @@ export function createApp(options: CreateAppOptions): Express {
       ingestEnv,
       createConfiguredSourcesFn,
       apifyClient,
+      leadPlanner,
     })
   );
 

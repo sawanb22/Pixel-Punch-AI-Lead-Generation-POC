@@ -10,6 +10,17 @@ import { insertLeads, listLeads } from "../../src/leads/leads.repo.js";
 import { createProject } from "../../src/projects/projects.repo.js";
 import { isAllowlisted } from "../../src/users/users.repo.js";
 import { resetDefaultFeedbackRag } from "../../src/feedback/feedback.repo.js";
+import { defaultAgencyLeadPlan } from "../../src/discovery/lead-plan.js";
+import type { HermesLeadPlanner } from "../../src/discovery/hermes-lead-planner.js";
+
+const mockLeadPlanner = {
+  async generatePlan(input) {
+    return {
+      plan: defaultAgencyLeadPlan(input),
+      fromFallback: true,
+    };
+  },
+} as Pick<HermesLeadPlanner, "generatePlan"> as HermesLeadPlanner;
 
 describe("dashboard API", () => {
   let db: DB;
@@ -46,6 +57,7 @@ describe("dashboard API", () => {
     return createApp({
       db,
       scorer: new MockScorer(),
+      leadPlanner: mockLeadPlanner,
       allowlist: ["dev@local"],
       mxResolver: async () => [{ exchange: "mx.test", priority: 10 }],
     });
@@ -166,77 +178,51 @@ describe("dashboard API", () => {
     expect(exportP2.text).not.toContain("Only P1");
   });
 
-  it("create project with sourceConfig, PATCH, and ingest via Find leads API", async () => {
-    const mockSource = {
-      name: "mock",
-      fetch: async () => [
-        {
-          company: "Analytics Co",
-          website: "https://analytics.example",
-          email: "hi@analytics.example",
-          votes: 10,
-          source: "jina",
-        },
-      ],
-    };
+  it("create and PATCH project fields without requiring source JSON", async () => {
+    const agent = request(app());
+    const created = await agent.post("/api/projects").send({
+      name: "Hunt UI",
+      website: "https://pixelpunch.example",
+      icp: "AI integrations and websites for SMBs",
+      geography: "US",
+      volumeTarget: 100,
+    });
+    expect(created.status).toBe(201);
+    expect(created.body.leadPlan).toBeTruthy();
+    const projectId = created.body.id as number;
+
+    const patched = await agent.patch(`/api/projects/${projectId}`).send({
+      icp: "AI agents for restaurants",
+      volumeTarget: 250,
+    });
+    expect(patched.status).toBe(200);
+    expect(patched.body.icp).toBe("AI agents for restaurants");
+    expect(patched.body.leadPlan).toContain("250");
+  });
+
+  it("ingest returns 400 when APIFY_TOKEN missing for Find leads", async () => {
     const agent = request(
       createApp({
         db,
         scorer: new MockScorer(),
+        leadPlanner: mockLeadPlanner,
         allowlist: ["dev@local"],
-        mxResolver: async () => [{ exchange: "mx.test", priority: 10 }],
-        createConfiguredSourcesFn: () => ({
-          sources: [mockSource],
-          enrich: false,
-        }),
+        ingestEnv: {},
       })
     );
-
     const created = await agent.post("/api/projects").send({
-      name: "Hunt UI",
-      website: "https://pixelpunch.example",
-      icp: "B2B analytics",
-      sourceConfig: {
-        producthunt: { enabled: true, first: 5 },
-        jina: { enabled: true, query: "analytics saas", num: 5 },
-        enrich: true,
-      },
+      name: "No Token",
+      icp: "AI websites for SMBs",
     });
-    expect(created.status).toBe(201);
-    expect(created.body.sourceConfig).toContain("analytics saas");
-    const projectId = created.body.id as number;
-
-    const patched = await agent.patch(`/api/projects/${projectId}`).send({
-      sourceConfig: {
-        jina: { enabled: true, query: "decision intelligence", num: 8 },
-        enrich: true,
-      },
-    });
-    expect(patched.status).toBe(200);
-    expect(patched.body.sourceConfig).toContain("decision intelligence");
-
-    const ingested = await agent.post(`/api/projects/${projectId}/ingest`);
-    expect(ingested.status).toBe(201);
-    expect(ingested.body.kept).toBe(1);
-
-    const leads = await agent.get(`/api/projects/${projectId}/leads`);
-    expect(leads.body.some((l: { company: string }) => l.company === "Analytics Co")).toBe(
-      true
-    );
-  });
-
-  it("ingest returns 400 when no sources configured", async () => {
-    const agent = request(app());
-    const created = await agent.post("/api/projects").send({ name: "Empty" });
     expect(created.status).toBe(201);
     const ingested = await agent.post(
       `/api/projects/${created.body.id}/ingest`
     );
     expect(ingested.status).toBe(400);
-    expect(ingested.body.error).toMatch(/No sources/i);
+    expect(ingested.body.error).toMatch(/APIFY_TOKEN/);
   });
 
-  it("Find leads runs Apify lead finding when leadFinding sources are configured", async () => {
+  it("Find leads one-click uses Apify via lead plan without source JSON", async () => {
     const mockClient = {
       runActorAndGetItems: async () => ({
         runId: "run-dash",
@@ -244,13 +230,12 @@ describe("dashboard API", () => {
         status: "SUCCEEDED",
         items: [
           {
-            name: "Dash Co",
-            website: "https://dash.example",
-            url: "https://src/dash",
+            title: "Dash Co",
+            url: "https://dash.example",
           },
           {
-            name: "Noise",
-            website: "https://linkedin.com/company/noise",
+            title: "Noise",
+            url: "https://linkedin.com/company/noise",
           },
         ],
       }),
@@ -260,80 +245,37 @@ describe("dashboard API", () => {
       createApp({
         db,
         scorer: new MockScorer(),
+        leadPlanner: mockLeadPlanner,
         allowlist: ["dev@local"],
         mxResolver: async () => [{ exchange: "mx.test", priority: 10 }],
         apifyClient: mockClient as never,
+        ingestEnv: { APIFY_TOKEN: "test" },
       })
     );
 
     const created = await agent.post("/api/projects").send({
       name: "Apify Project",
-      icp: "local restaurants",
-      sourceConfig: {
-        leadFinding: {
-          mode: "apify_first",
-          sources: [
-            {
-              id: "maps",
-              type: "apify",
-              actorId: "user/maps",
-              mapping: {
-                companyField: "name",
-                websiteField: "website",
-                sourceUrlField: "url",
-              },
-            },
-          ],
-        },
-      },
+      icp: "We build AI agents and websites for local businesses",
+      geography: "Austin",
+      volumeTarget: 50,
     });
     expect(created.status).toBe(201);
+    expect(created.body.leadPlan).toBeTruthy();
 
     const ingested = await agent.post(
       `/api/projects/${created.body.id}/ingest`
     );
     expect(ingested.status).toBe(201);
     expect(ingested.body.runId).toBeGreaterThan(0);
-    expect(ingested.body.kept).toBe(1);
-    expect(ingested.body.rejected).toBeGreaterThanOrEqual(1);
-    expect(ingested.body.sourcesRun).toBe(1);
-    expect(ingested.body.errors).toEqual([]);
+    expect(ingested.body.kept).toBeGreaterThanOrEqual(1);
+    expect(ingested.body.plan).toBeTruthy();
 
-    const leads = await agent.get(`/api/projects/${created.body.id}/leads`);
-    expect(leads.body.some((l: { company: string }) => l.company === "Dash Co")).toBe(
-      true
+    const activity = await agent.get(
+      `/api/projects/${created.body.id}/discovery/latest`
     );
-  });
-
-  it("Find leads returns 400 when APIFY_TOKEN missing for leadFinding", async () => {
-    const agent = request(
-      createApp({
-        db,
-        scorer: new MockScorer(),
-        allowlist: ["dev@local"],
-        ingestEnv: {},
-      })
-    );
-    const created = await agent.post("/api/projects").send({
-      name: "No Token",
-      sourceConfig: {
-        leadFinding: {
-          sources: [
-            {
-              id: "maps",
-              type: "apify",
-              actorId: "a/b",
-              mapping: { companyField: "n", websiteField: "w" },
-            },
-          ],
-        },
-      },
-    });
-    const ingested = await agent.post(
-      `/api/projects/${created.body.id}/ingest`
-    );
-    expect(ingested.status).toBe(400);
-    expect(ingested.body.error).toMatch(/APIFY_TOKEN/);
+    expect(activity.status).toBe(200);
+    expect(activity.body.run).toBeTruthy();
+    expect(activity.body.timeline.length).toBeGreaterThan(0);
   });
 
   it("POST enrich-companies returns summary and stays project-scoped", async () => {
@@ -353,6 +295,7 @@ describe("dashboard API", () => {
       createApp({
         db,
         scorer: new MockScorer(),
+        leadPlanner: mockLeadPlanner,
         allowlist: ["dev@local"],
         enrichFetch: fetchMock,
       })

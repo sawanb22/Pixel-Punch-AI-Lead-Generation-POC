@@ -65,6 +65,7 @@ describe("lead-finding-config", () => {
             ],
           },
         }),
+        leadPlan: null,
         status: "active",
         createdAt: "",
       },

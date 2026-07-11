@@ -79,8 +79,6 @@
 
   <section class="ops">
     <button id="btn-find-leads" type="button" class="primary">Find leads</button>
-    <button id="btn-enrich-companies" type="button">Enrich companies</button>
-    <button id="btn-score" type="button">Run scoring</button>
     <button id="btn-project-settings" type="button" class="ghost">Project settings</button>
     <label class="file-btn">
       Import CSV
@@ -88,8 +86,44 @@
     </label>
     <button id="btn-export-all" type="button">Export All</button>
     <button id="btn-export-emails" type="button">Export Emails</button>
+    <details class="more-ops">
+      <summary>More</summary>
+      <div class="more-ops-panel">
+        <button id="btn-enrich-companies" type="button">Enrich companies</button>
+        <button id="btn-score" type="button">Run scoring</button>
+      </div>
+    </details>
     <span class="ops-spacer"></span>
     <button id="btn-shortcuts" type="button" class="shortcut-hint-btn ghost" title="Keyboard shortcuts">?</button>
+  </section>
+
+  <section class="plan-activity">
+    <article id="lead-plan-card" class="panel-card">
+      <div class="panel-card-head">
+        <h2>Lead plan</h2>
+        <span id="lead-plan-status" class="muted">—</span>
+      </div>
+      <p id="lead-plan-goal" class="plan-goal">Create or open a project to draft a plan.</p>
+      <dl id="lead-plan-meta" class="plan-meta muted"></dl>
+      <ul id="lead-plan-angles" class="plan-angles"></ul>
+      <div class="plan-actions">
+        <button id="btn-regen-plan" type="button" class="ghost" disabled>Regenerate plan</button>
+      </div>
+      <label class="plan-feedback">
+        Feedback for next plan
+        <textarea id="lead-plan-feedback" rows="2" placeholder="e.g. more local restaurants, focus on funded startups…" disabled></textarea>
+      </label>
+      <button id="btn-plan-feedback" type="button" class="ghost" disabled>Apply feedback</button>
+    </article>
+    <article id="activity-card" class="panel-card">
+      <div class="panel-card-head">
+        <h2>Activity</h2>
+        <button id="btn-refresh-activity" type="button" class="ghost tiny" disabled>Refresh</button>
+      </div>
+      <p id="activity-summary" class="muted">No discovery runs yet.</p>
+      <ol id="activity-timeline" class="activity-timeline"></ol>
+      <div id="activity-rejected" class="activity-rejected hidden"></div>
+    </article>
   </section>
 
   <section class="filters">
@@ -153,7 +187,7 @@
   <div id="new-project-backdrop" class="dialog-backdrop" role="presentation" inert>
     <div class="dialog dialog-wide" role="dialog" aria-labelledby="new-project-title" aria-modal="true">
       <h2 id="new-project-title">New project</h2>
-      <p class="dialog-desc">Create a client project, ICP, and optional live sources for Find leads.</p>
+      <p class="dialog-desc">Describe who you help. We’ll draft an Apify lead plan automatically.</p>
       <form id="new-project-form">
         <div class="dialog-fields">
           <label>
@@ -166,40 +200,28 @@
           </label>
           <label>
             Description
-            <input name="description" placeholder="Short product description" autocomplete="off" />
+            <input name="description" placeholder="Short agency description" autocomplete="off" />
           </label>
           <label>
-            ICP
-            <textarea name="icp" rows="4" placeholder="Ideal customer profile…"></textarea>
+            What we sell / who we help
+            <textarea name="icp" rows="4" placeholder="e.g. We build AI agents and websites for local SMBs…"></textarea>
           </label>
-          <fieldset class="source-fieldset">
-            <legend>Sources</legend>
-            <label class="check-row">
-              <input type="checkbox" name="ph_enabled" checked />
-              Product Hunt
-            </label>
-            <label class="check-row">
-              <input type="checkbox" name="jina_enabled" checked />
-              Jina web search
-            </label>
-            <label>
-              Jina query
-              <input name="jina_query" value="B2B SaaS AI data analytics OR decision intelligence product startup" autocomplete="off" />
-            </label>
-            <label class="check-row">
-              <input type="checkbox" name="enrich" checked />
-              Enrich websites (mailto emails)
-            </label>
-            <label>
-              Advanced source config (JSON)
-              <textarea
-                name="source_config_json"
-                rows="8"
-                spellcheck="false"
-                placeholder='Optional. Example: { "leadFinding": { ... }, "companyEnrichment": { "enabled": true } }'
-              ></textarea>
-            </label>
-          </fieldset>
+          <label>
+            Geography (optional)
+            <input name="geography" placeholder="e.g. Austin, TX or DACH" autocomplete="off" />
+          </label>
+          <label>
+            Target volume
+            <select name="volumeTarget">
+              <option value="25">25</option>
+              <option value="50">50</option>
+              <option value="100" selected>100</option>
+              <option value="250">250</option>
+              <option value="500">500</option>
+              <option value="1000">1000</option>
+              <option value="2000">2000</option>
+            </select>
+          </label>
         </div>
         <div class="dialog-actions">
           <button id="btn-cancel-project" type="button" class="ghost">Cancel</button>
@@ -212,7 +234,7 @@
   <div id="settings-backdrop" class="dialog-backdrop" role="presentation" inert>
     <div class="dialog dialog-wide" role="dialog" aria-labelledby="settings-title" aria-modal="true">
       <h2 id="settings-title">Project settings</h2>
-      <p class="dialog-desc">Edit ICP and live sources, then use Find leads / Enrich companies.</p>
+      <p class="dialog-desc">Update ICP, geography, and volume. Find leads uses Apify from your lead plan.</p>
       <form id="settings-form">
         <div class="dialog-fields">
           <label>
@@ -228,37 +250,25 @@
             <input name="description" autocomplete="off" />
           </label>
           <label>
-            ICP
-            <textarea name="icp" rows="4" placeholder="Ideal customer profile…"></textarea>
+            What we sell / who we help
+            <textarea name="icp" rows="4" placeholder="Ideal customer profile in plain English…"></textarea>
           </label>
-          <fieldset class="source-fieldset">
-            <legend>Sources</legend>
-            <label class="check-row">
-              <input type="checkbox" name="ph_enabled" />
-              Product Hunt
-            </label>
-            <label class="check-row">
-              <input type="checkbox" name="jina_enabled" />
-              Jina web search
-            </label>
-            <label>
-              Jina query
-              <input name="jina_query" autocomplete="off" />
-            </label>
-            <label class="check-row">
-              <input type="checkbox" name="enrich" />
-              Enrich websites (mailto emails)
-            </label>
-            <label>
-              Advanced source config (JSON)
-              <textarea
-                name="source_config_json"
-                rows="10"
-                spellcheck="false"
-                placeholder='Paste leadFinding / companyEnrichment JSON here. See docs/apify-lead-finding.md'
-              ></textarea>
-            </label>
-          </fieldset>
+          <label>
+            Geography (optional)
+            <input name="geography" placeholder="e.g. Austin, TX or DACH" autocomplete="off" />
+          </label>
+          <label>
+            Target volume
+            <select name="volumeTarget">
+              <option value="25">25</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+              <option value="250">250</option>
+              <option value="500">500</option>
+              <option value="1000">1000</option>
+              <option value="2000">2000</option>
+            </select>
+          </label>
         </div>
         <div class="dialog-actions">
           <button id="btn-cancel-settings" type="button" class="ghost">Cancel</button>

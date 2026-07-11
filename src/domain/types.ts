@@ -18,7 +18,8 @@ export interface Project {
   website: string | null;
   description: string | null;
   icp: string | null;
-  sourceConfig: string | null; // JSON string
+  sourceConfig: string | null; // JSON string (internal/legacy)
+  leadPlan: string | null; // JSON string — human lead plan
   status: string;
   createdAt: string;
 }

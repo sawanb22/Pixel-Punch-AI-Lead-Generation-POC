@@ -29,6 +29,7 @@ function makeProject(overrides: Partial<Project> = {}): Project {
     description: null,
     icp: "saas b2b",
     sourceConfig: null,
+    leadPlan: null,
     status: "active",
     createdAt: "2026-01-01",
     ...overrides,

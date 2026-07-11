@@ -13,11 +13,11 @@ Open http://localhost:3000 — signed in as `dev@local`. Scoring uses Hermes at 
 
 ### Dashboard lead hunt (no CLI)
 
-1. **New project** — name, website, ICP, enable Product Hunt / Jina, set Jina query, enrich on.
-2. **Find leads** — runs configured sources + optional website enrich.
-3. **Run scoring** — Hermes (or Mock if `SCORE_MOCK=1`).
-4. Review / Approve / Reject / Export as before.
-5. **Project settings** — edit ICP and sources anytime.
+1. **New project** — name, what you sell / who you help (ICP), optional geography, target volume (up to 2000).
+2. Review the **Lead plan** card (auto-drafted by Hermes, or a deterministic fallback). Optionally regenerate or send feedback.
+3. **Find leads** — compiles the plan to Apify jobs only (`APIFY_TOKEN` required). Watch the **Activity** panel for run status.
+4. Review companies in the table / Export. Enrich and scoring stay under **More** when you need them.
+5. **Project settings** — edit ICP, geography, and volume anytime (no JSON).
 
 Auth stays on **`LEADRADAR_AUTH_BYPASS=1`** until you explicitly enable Google OAuth for production.
 
