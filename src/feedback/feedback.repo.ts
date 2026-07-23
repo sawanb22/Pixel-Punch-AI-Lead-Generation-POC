@@ -1,12 +1,15 @@
 import type { DB } from "../db/database.js";
 import { getLead } from "../leads/leads.repo.js";
+import { appendLeadListNegatives } from "../leads/lead-lists.repo.js";
 import type { FeedbackRag } from "../rag/feedback-rag.js";
 import { FileFeedbackRag } from "../rag/file-feedback-rag.js";
 import { syncFeedbackToRag } from "../rag/sync-feedback.js";
+import { hostnameOf } from "../discovery/hard-shield.js";
 
 export interface NewFeedback {
   projectId: number;
   leadId: number;
+  leadListId?: number | null;
   good: boolean;
   notes: string | null;
   reviewedBy: string | null;
@@ -48,15 +51,17 @@ export function recordFeedback(
   input: NewFeedback,
   options?: RecordFeedbackOptions
 ): void {
-  if (!getLead(db, input.projectId, input.leadId)) {
+  const lead = getLead(db, input.projectId, input.leadId);
+  if (!lead) {
     throw new Error(`lead ${input.leadId} not found in project ${input.projectId}`);
   }
   db.prepare(
-    `INSERT INTO feedback (project_id, lead_id, good, notes, reviewed_by, source)
-     VALUES (?, ?, ?, ?, ?, ?)`
+    `INSERT INTO feedback (project_id, lead_id, lead_list_id, good, notes, reviewed_by, source)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
   ).run(
     input.projectId,
     input.leadId,
+    input.leadListId ?? lead.leadListId ?? null,
     input.good ? 1 : 0,
     input.notes,
     input.reviewedBy,
@@ -66,6 +71,28 @@ export function recordFeedback(
   db.prepare(
     `UPDATE leads SET status = ? WHERE project_id = ? AND id = ?`
   ).run(input.good ? "approved" : "rejected", input.projectId, input.leadId);
+
+  // Reject → filter flywheel: append domain / note tokens to list plan negatives
+  if (!input.good) {
+    const listId = input.leadListId ?? lead.leadListId;
+    if (listId) {
+      const tokens: string[] = [];
+      const domain =
+        lead.canonicalDomain ?? hostnameOf(lead.website);
+      if (domain) tokens.push(domain);
+      if (input.notes?.trim()) {
+        for (const part of input.notes.split(/[,;\n]+/)) {
+          const t = part.trim().toLowerCase().replace(/^(avoid|no)\s+/, "");
+          if (t.length >= 3) tokens.push(t);
+        }
+      }
+      try {
+        appendLeadListNegatives(db, listId, tokens);
+      } catch {
+        // Best-effort: feedback row is source of truth
+      }
+    }
+  }
 
   const rag = resolveRag(options);
   if (rag) {
@@ -77,16 +104,28 @@ export function recordFeedback(
   }
 }
 
-export function getFeedbackStats(db: DB, projectId: number): FeedbackStats {
-  const row = db
-    .prepare(
-      `SELECT
-         COUNT(*) AS total,
-         SUM(CASE WHEN good = 1 THEN 1 ELSE 0 END) AS good,
-         SUM(CASE WHEN good = 0 THEN 1 ELSE 0 END) AS bad
-       FROM feedback WHERE project_id = ?`
-    )
-    .get(projectId) as { total: number; good: number | null; bad: number | null };
+export function getFeedbackStats(
+  db: DB,
+  projectId: number,
+  leadListId?: number
+): FeedbackStats {
+  const row = (
+    leadListId != null
+      ? db.prepare(
+          `SELECT
+             COUNT(*) AS total,
+             SUM(CASE WHEN good = 1 THEN 1 ELSE 0 END) AS good,
+             SUM(CASE WHEN good = 0 THEN 1 ELSE 0 END) AS bad
+           FROM feedback WHERE project_id = ? AND lead_list_id = ?`
+        ).get(projectId, leadListId)
+      : db.prepare(
+          `SELECT
+             COUNT(*) AS total,
+             SUM(CASE WHEN good = 1 THEN 1 ELSE 0 END) AS good,
+             SUM(CASE WHEN good = 0 THEN 1 ELSE 0 END) AS bad
+           FROM feedback WHERE project_id = ?`
+        ).get(projectId)
+  ) as { total: number; good: number | null; bad: number | null };
   const total = Number(row.total) || 0;
   const good = Number(row.good) || 0;
   const bad = Number(row.bad) || 0;

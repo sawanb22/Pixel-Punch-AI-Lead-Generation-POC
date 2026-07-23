@@ -7,3 +7,13 @@ dist/
 .DS_Store
 data/rag/
 data/rag-e2e-verify/
+
+# Archives & Temp Files
+*.zip
+docs/testing/_e2e-results.json
+
+# Docker & Sub-project sensitive runtime files
+docker-dist/.env
+docker-dist/leadradar/.env
+docker-dist/leadradar/*.db
+docker-dist/hermes-agent/

@@ -11,6 +11,7 @@ export interface ClarifyMessage {
 interface LeadRow {
   id: number;
   project_id: number;
+  lead_list_id: number | null;
   company: string;
   website: string | null;
   canonical_domain: string | null;
@@ -27,6 +28,7 @@ function toLead(row: LeadRow): Lead {
   return {
     id: row.id,
     projectId: row.project_id,
+    leadListId: row.lead_list_id,
     company: row.company,
     website: row.website,
     canonicalDomain: row.canonical_domain,

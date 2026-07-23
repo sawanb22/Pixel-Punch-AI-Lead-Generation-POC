@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   getNestedField,
   mapApifyItemToCandidate,
+  expandApifyDatasetItems,
   type ApifyResultMapping,
 } from "../../src/discovery/map-candidate.js";
 import {
@@ -22,6 +23,71 @@ describe("getNestedField", () => {
     expect(getNestedField({ a: { b: "x" } }, "a.b")).toBe("x");
     expect(getNestedField({ title: "Acme" }, "title")).toBe("Acme");
     expect(getNestedField({}, "missing")).toBeUndefined();
+  });
+});
+
+describe("expandApifyDatasetItems", () => {
+  it("flattens nested organicResults from Google SERP pages", () => {
+    const expanded = expandApifyDatasetItems([
+      {
+        searchQuery: { term: "ai startups" },
+        url: "https://www.google.com/search?q=ai",
+        organicResults: [
+          {
+            title: "Acme AI — Home",
+            url: "https://acme.ai",
+            displayedUrl: "https://acme.ai",
+            type: "organic",
+          },
+          {
+            title: "Beta Labs",
+            url: "https://beta.example",
+            displayedUrl: "beta.example",
+            type: "organic",
+          },
+        ],
+      },
+      {
+        title: "Flat Maps Place",
+        website: "https://place.example",
+        url: "https://maps.example/1",
+      },
+    ]);
+    expect(expanded).toHaveLength(3);
+    expect(expanded[0]).toMatchObject({
+      title: "Acme AI — Home",
+      url: "https://acme.ai",
+    });
+    expect(expanded[2]).toMatchObject({ title: "Flat Maps Place" });
+  });
+
+  it("maps expanded SERP organic rows to candidates", () => {
+    const [row] = expandApifyDatasetItems([
+      {
+        organicResults: [
+          {
+            title: "Stripe | Payment Processing",
+            url: "https://stripe.com",
+            displayedUrl: "https://stripe.com",
+            type: "organic",
+          },
+        ],
+      },
+    ]);
+    const candidate = mapApifyItemToCandidate(row, {
+      sourceId: "apify-search-1",
+      sourceType: "apify",
+      mapping: {
+        companyField: "title",
+        websiteField: "url",
+        sourceUrlField: "url",
+      },
+    });
+    expect(candidate).toMatchObject({
+      company: "Stripe",
+      website: "https://stripe.com",
+      domain: "stripe.com",
+    });
   });
 });
 

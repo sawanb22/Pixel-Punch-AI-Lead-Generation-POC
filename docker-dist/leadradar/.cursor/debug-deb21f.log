@@ -1,0 +1,2 @@
+{"sessionId":"deb21f","location":"app.js:loadLeadPlan","message":"Plan loaded","data":{"listId":10,"leadListId":10,"planState":"ready","hasPlan":true},"timestamp":1783773381440,"hypothesisId":"B-C"}
+{"sessionId":"deb21f","location":"app.js:loadLeadPlan","message":"Plan loaded","data":{"listId":10,"leadListId":10,"planState":"ready","hasPlan":true},"timestamp":1783773569507,"hypothesisId":"B-C"}

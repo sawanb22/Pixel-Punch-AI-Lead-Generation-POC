@@ -1,0 +1,31 @@
+services:
+  leadradar:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: leadradar
+    restart: unless-stopped
+    ports:
+      - "3095:3000"
+      - "8642:8642"
+    env_file:
+      - .env
+    environment:
+      - APIFY_TOKEN=${APIFY_TOKEN:-}
+      - PRODUCTHUNT_TOKEN=${PRODUCTHUNT_TOKEN:-}
+      - JINA_API_KEY=${JINA_API_KEY:-}
+      - LEADRADAR_AUTH_BYPASS=${LEADRADAR_AUTH_BYPASS:-1}
+      - HERMES_API_BASE=${HERMES_API_BASE:-http://127.0.0.1:8642}
+      - HERMES_API_KEY=${HERMES_API_KEY:-qhbmv2kczeywp164ngt57xa38olsjrdu}
+      - BIFROST_BASE_URL=${BIFROST_BASE_URL:-http://host.docker.internal:8888/v1}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # Persists the SQLite database across container rebuilds
+      - leadradar_data:/app/data
+      # Persists Hermes agent config, sessions, and memory across rebuilds
+      - hermes_home:/hermes_home
+
+volumes:
+  leadradar_data:
+  hermes_home:

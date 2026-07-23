@@ -36,6 +36,7 @@ export interface DiscoveredCompanyCandidate {
 export interface DiscoveryRun {
   id: number;
   projectId: number;
+  leadListId: number | null;
   status: DiscoveryRunStatus;
   fetchedCount: number;
   keptCount: number;
@@ -43,6 +44,11 @@ export interface DiscoveryRun {
   rejectedCount: number;
   costEstimate: number | null;
   error: string | null;
+  plannerInputJson: string | null;
+  plannerRawJson: string | null;
+  payloadJson: string | null;
+  compiledJobsJson: string | null;
+  validationNotes: string | null;
   startedAt: string;
   finishedAt: string | null;
 }

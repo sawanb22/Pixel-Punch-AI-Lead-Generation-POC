@@ -1,0 +1,28 @@
+model:
+  provider: custom:bifrost
+  default: vertex/gemini-3.1-flash-lite
+  base_url: http://host.docker.internal:8888/v1
+_config_version: 33
+API_SERVER_ENABLED: true
+API_SERVER_KEY: qhbmv2kczeywp164ngt57xa38olsjrdu
+API_SERVER_PORT: 8642
+API_SERVER_HOST: 0.0.0.0
+mcp_servers:
+  apify:
+    url: "https://mcp.apify.com?token=${APIFY_TOKEN}"
+    enabled: true
+  leadradar:
+    command: npx
+    args:
+      - tsx
+      - /app/src/mcp/server.ts
+    enabled: true
+    env:
+      LEADRADAR_DB: /app/data/leadradar.db
+platform_toolsets:
+  api_server:
+    - no_mcp
+custom_providers:
+  - name: bifrost
+    base_url: http://host.docker.internal:8888/v1
+    model: vertex/gemini-3.1-flash-lite

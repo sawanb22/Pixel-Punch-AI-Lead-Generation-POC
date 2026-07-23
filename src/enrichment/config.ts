@@ -6,6 +6,7 @@ export interface CompanyEnrichmentConfig {
   timeoutSeconds: number;
   respectRobots: boolean;
   autoAfterLeadFinding: boolean;
+  useJinaReader: boolean;
 }
 
 const DEFAULTS: CompanyEnrichmentConfig = {
@@ -16,6 +17,7 @@ const DEFAULTS: CompanyEnrichmentConfig = {
   timeoutSeconds: 10,
   respectRobots: true,
   autoAfterLeadFinding: false,
+  useJinaReader: true,
 };
 
 function asObject(value: unknown): Record<string, unknown> | null {
@@ -48,6 +50,7 @@ export function parseCompanyEnrichmentConfig(
         : DEFAULTS.timeoutSeconds,
     respectRobots: cfg.respectRobots !== false,
     autoAfterLeadFinding: cfg.autoAfterLeadFinding === true,
+    useJinaReader: cfg.useJinaReader !== false,
   };
 }
 

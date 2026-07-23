@@ -22,6 +22,8 @@ export interface FetchPageOptions {
   timeoutMs?: number;
   useCache?: boolean;
   userAgent?: string;
+  useJinaReader?: boolean;
+  jinaApiKey?: string;
 }
 
 function isHtml(contentType: string | null): boolean {
@@ -33,6 +35,101 @@ function cacheFresh(fetchedAt: string): boolean {
   const ts = Date.parse(fetchedAt);
   if (!Number.isFinite(ts)) return false;
   return Date.now() - ts < PAGE_CACHE_TTL_MS;
+}
+
+function isLikelySpaOrSkeleton(body: string | null): boolean {
+  if (!body) return true;
+  const cleanBody = body
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .trim();
+  const textLength = cleanBody.replace(/\s+/g, "").length;
+  if (textLength < 250 && (/id=["'](root|app|__next)["']/i.test(body) || /<app-root/i.test(body))) {
+    return true;
+  }
+  return false;
+}
+
+async function fetchViaJina(
+  url: string,
+  options: FetchPageOptions
+): Promise<FetchedPage> {
+  const apiKey = options.jinaApiKey ?? process.env.JINA_API_KEY;
+  if (!apiKey) {
+    return {
+      url,
+      finalUrl: url,
+      httpStatus: 0,
+      contentType: null,
+      body: null,
+      fromCache: false,
+      error: "jina_no_api_key",
+    };
+  }
+
+  const jinaUrl = `https://r.jina.ai/${encodeURI(url)}`;
+  const controller = new AbortController();
+  const timer = setTimeout(
+    () => controller.abort(),
+    options.timeoutMs ?? 15_000
+  );
+
+  try {
+    const res = await options.fetch(jinaUrl, {
+      method: "GET",
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        Accept: "application/json",
+        "X-Return-Format": "markdown",
+      },
+    });
+    clearTimeout(timer);
+
+    const body = await res.text();
+    if (!res.ok) {
+      return {
+        url,
+        finalUrl: url,
+        httpStatus: res.status,
+        contentType: "application/json",
+        body: null,
+        fromCache: false,
+        error: `Jina Reader failed: HTTP ${res.status}`,
+      };
+    }
+
+    if (options.db) {
+      putCachedPage(options.db, {
+        url,
+        finalUrl: url,
+        httpStatus: res.status,
+        contentType: "application/json",
+        body,
+      });
+    }
+
+    return {
+      url,
+      finalUrl: url,
+      httpStatus: res.status,
+      contentType: "application/json",
+      body,
+      fromCache: false,
+    };
+  } catch (err) {
+    clearTimeout(timer);
+    return {
+      url,
+      finalUrl: url,
+      httpStatus: 0,
+      contentType: null,
+      body: null,
+      fromCache: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
 }
 
 export async function fetchHtmlPage(
@@ -53,6 +150,7 @@ export async function fetchHtmlPage(
     }
   }
 
+  let stdFetchResult: FetchedPage | null = null;
   const controller = new AbortController();
   const timer = setTimeout(
     () => controller.abort(),
@@ -75,7 +173,7 @@ export async function fetchHtmlPage(
     const finalUrl = res.url || url;
 
     if (!res.ok) {
-      const result: FetchedPage = {
+      stdFetchResult = {
         url,
         finalUrl,
         httpStatus: res.status,
@@ -84,20 +182,8 @@ export async function fetchHtmlPage(
         fromCache: false,
         error: `HTTP ${res.status}`,
       };
-      if (options.db) {
-        putCachedPage(options.db, {
-          url,
-          finalUrl,
-          httpStatus: res.status,
-          contentType,
-          body: null,
-        });
-      }
-      return result;
-    }
-
-    if (!isHtml(contentType)) {
-      return {
+    } else if (!isHtml(contentType)) {
+      stdFetchResult = {
         url,
         finalUrl,
         httpStatus: res.status,
@@ -106,30 +192,41 @@ export async function fetchHtmlPage(
         fromCache: false,
         error: "non_html",
       };
+    } else {
+      const body = await res.text();
+      if (isLikelySpaOrSkeleton(body)) {
+        stdFetchResult = {
+          url,
+          finalUrl,
+          httpStatus: res.status,
+          contentType,
+          body,
+          fromCache: false,
+          error: "spa_detected",
+        };
+      } else {
+        if (options.db) {
+          putCachedPage(options.db, {
+            url,
+            finalUrl,
+            httpStatus: res.status,
+            contentType,
+            body: body.slice(0, 500_000),
+          });
+        }
+        return {
+          url,
+          finalUrl,
+          httpStatus: res.status,
+          contentType,
+          body,
+          fromCache: false,
+        };
+      }
     }
-
-    const body = await res.text();
-    if (options.db) {
-      putCachedPage(options.db, {
-        url,
-        finalUrl,
-        httpStatus: res.status,
-        contentType,
-        body: body.slice(0, 500_000),
-      });
-    }
-
-    return {
-      url,
-      finalUrl,
-      httpStatus: res.status,
-      contentType,
-      body,
-      fromCache: false,
-    };
   } catch (err) {
     clearTimeout(timer);
-    return {
+    stdFetchResult = {
       url,
       finalUrl: url,
       httpStatus: 0,
@@ -139,4 +236,14 @@ export async function fetchHtmlPage(
       error: err instanceof Error ? err.message : String(err),
     };
   }
+
+  // Trigger Jina fallback if standard fetch failed or detected SPA
+  if (options.useJinaReader !== false) {
+    const jinaResult = await fetchViaJina(url, options);
+    if (jinaResult.body) {
+      return jinaResult;
+    }
+  }
+
+  return stdFetchResult;
 }

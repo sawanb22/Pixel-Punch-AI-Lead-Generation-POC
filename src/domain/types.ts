@@ -1,6 +1,7 @@
 export const LEAD_STATUSES = [
   "raw",
   "gated",
+  "provisional",
   "scored",
   "approved",
   "rejected",
@@ -20,6 +21,10 @@ export interface Project {
   icp: string | null;
   sourceConfig: string | null; // JSON string (internal/legacy)
   leadPlan: string | null; // JSON string — human lead plan
+  leadStrategy: string | null; // JSON string — enabled actors / buyer mode
+  websiteSummary: string | null;
+  websiteSummaryAt: string | null;
+  activeLeadListId: number | null;
   status: string;
   createdAt: string;
 }
@@ -37,6 +42,7 @@ export interface CanonicalLead {
 export interface Lead extends CanonicalLead {
   id: number;
   projectId: number;
+  leadListId: number | null;
   canonicalDomain: string | null;
   sources: string[];
   status: LeadStatus;

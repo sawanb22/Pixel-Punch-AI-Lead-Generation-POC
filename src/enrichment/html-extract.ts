@@ -91,11 +91,13 @@ export function extractEmails(html: string): string[] {
   }
   return [...found];
 }
-
 export function extractSocialLinks(html: string): Record<string, string> {
   const socials: Record<string, string> = {};
   const hrefs = [...html.matchAll(/href=["']([^"']+)["']/gi)].map((m) => m[1]);
-  for (const href of hrefs) {
+  const markdownHrefs = [...html.matchAll(/\[[^\]]*\]\(([^)#\s]+)\)/gi)].map((m) => m[1]);
+  const allHrefs = [...hrefs, ...markdownHrefs];
+
+  for (const href of allHrefs) {
     try {
       const url = new URL(href, "https://example.com");
       const host = url.hostname.replace(/^www\./, "").toLowerCase();
@@ -118,10 +120,68 @@ export function extractSocialLinks(html: string): Record<string, string> {
 }
 
 export function extractLinksFromHtml(html: string): string[] {
-  return [...html.matchAll(/href=["']([^"'#]+)["']/gi)].map((m) => m[1]);
+  const hrefs = [...html.matchAll(/href=["']([^"'#]+)["']/gi)].map((m) => m[1]);
+  const markdownHrefs = [...html.matchAll(/\[[^\]]*\]\(([^)#\s]+)\)/gi)].map((m) => m[1]);
+  return [...new Set([...hrefs, ...markdownHrefs])];
 }
 
 export function extractPageContent(html: string): ExtractedPageContent {
+  if (html.trim().startsWith("{")) {
+    try {
+      const json = JSON.parse(html);
+      const data = json.data && typeof json.data === "object" ? json.data : json;
+      if (typeof data.content === "string") {
+        const content = data.content;
+        const title = typeof data.title === "string" ? cleanText(data.title) : null;
+        const metaDescription = typeof data.description === "string" ? cleanText(data.description) : null;
+        
+        const emails = extractEmails(content);
+        const descriptionEmails = metaDescription ? extractEmails(metaDescription) : [];
+        const allEmails = [...new Set([...emails, ...descriptionEmails])];
+        
+        const socialLinks = extractSocialLinks(content);
+        if (data.links && typeof data.links === "object") {
+          for (const val of Object.values(data.links)) {
+            if (typeof val === "string") {
+              try {
+                const url = new URL(val, "https://example.com");
+                const host = url.hostname.replace(/^www\./, "").toLowerCase();
+                if (host === "linkedin.com" || host.endsWith(".linkedin.com")) {
+                  socialLinks.linkedin ??= url.toString();
+                } else if (host === "twitter.com" || host === "x.com") {
+                  socialLinks.x ??= url.toString();
+                } else if (host === "github.com") {
+                  socialLinks.github ??= url.toString();
+                } else if (host === "facebook.com" || host === "fb.com") {
+                  socialLinks.facebook ??= url.toString();
+                } else if (host === "instagram.com") {
+                  socialLinks.instagram ??= url.toString();
+                }
+              } catch {
+                /* ignore */
+              }
+            }
+          }
+        }
+        
+        return {
+          title,
+          metaDescription,
+          ogTitle: null,
+          ogDescription: null,
+          organizationName: null,
+          locationHints: [],
+          categoryHints: [],
+          textSnippet: cleanText(content)?.slice(0, 500) ?? "",
+          emails: allEmails,
+          socialLinks,
+        };
+      }
+    } catch {
+      /* ignore JSON parse failure, fallback to HTML parsing */
+    }
+  }
+
   const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
   const title = cleanText(titleMatch?.[1] ?? null);
   const metaDescription = metaContent(html, "name", "description");

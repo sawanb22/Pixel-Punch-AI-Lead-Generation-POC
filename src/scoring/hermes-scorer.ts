@@ -23,20 +23,55 @@ function stripMarkdownFences(content: string): string {
   return fenced ? fenced[1]!.trim() : trimmed;
 }
 
+/**
+ * Strip known safety / refusal preamble lines before parsing.
+ * e.g. "User Safety: safe" emitted by some free OpenRouter models.
+ */
+function stripSafetyPreamble(content: string): string {
+  return content
+    .split(/\r?\n/)
+    .filter((line) => !/^\s*user\s+safety\s*:/i.test(line))
+    .join("\n")
+    .trim();
+}
+
+/**
+ * Try to parse key:value prose format that some models emit instead of JSON:
+ *   score: 75
+ *   reasons: Good ICP fit…
+ */
+function tryParseKeyValueProse(content: string): string | null {
+  const scoreMatch = content.match(/score\s*[:\-]\s*(\d+)/i);
+  const reasonsMatch = content.match(/reasons?\s*[:\-]\s*([\s\S]+)/i);
+  if (scoreMatch && reasonsMatch) {
+    return JSON.stringify({
+      score: Number(scoreMatch[1]),
+      reasons: reasonsMatch[1].trim().slice(0, 500),
+    });
+  }
+  return null;
+}
+
 /** Pull the first JSON object from agent prose if needed. */
 export function extractJsonObject(content: string): string {
-  const stripped = stripMarkdownFences(content);
+  // Strip safety preamble first
+  const cleaned = stripSafetyPreamble(content);
+  const stripped = stripMarkdownFences(cleaned);
   try {
     JSON.parse(stripped);
     return stripped;
   } catch {
     /* fall through */
   }
+  // Try extracting {…} block
   const start = stripped.indexOf("{");
   const end = stripped.lastIndexOf("}");
   if (start >= 0 && end > start) {
     return stripped.slice(start, end + 1);
   }
+  // Try key:value prose fallback
+  const prose = tryParseKeyValueProse(stripped);
+  if (prose) return prose;
   return stripped;
 }
 
@@ -102,6 +137,7 @@ export class HermesScorer implements Scorer {
           { role: "user", content: userPrompt },
         ],
         temperature: 0,
+        max_tokens: 1000,
       }),
     });
 

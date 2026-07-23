@@ -6,6 +6,7 @@ function lead(partial: Partial<Lead> & Pick<Lead, "company">): Lead {
   return {
     id: 1,
     projectId: 1,
+    leadListId: null,
     website: null,
     email: null,
     votes: null,

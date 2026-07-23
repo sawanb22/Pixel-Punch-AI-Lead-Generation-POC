@@ -1,14 +1,23 @@
 # Apify lead finding
 
-Lead finding discovers **company name + website/domain** candidates. The dashboard **Find leads** path is **Apify-only**: Hermes (or a deterministic fallback) drafts a human-readable **lead plan**, and LeadRadar compiles that plan into Apify actor jobs. No Product Hunt / Jina / Google CSE on that path.
+Lead finding discovers **company name + website/domain** candidates. The dashboard **Find leads** path is **Apify-only** and uses the **Strategic Payload Generator**:
+
+1. Hermes (or a deterministic fallback) drafts a **strategic payload** — Apify actor keys + input JSON + reasoning.
+2. Code **validates** the payload against the project's **enabled actor pool**.
+3. Jobs run on Apify; results are filtered, deduped, and inserted into the **active lead list**.
+4. The **Operations Console** shows planner input, raw Hermes output, validated payload, and compiled jobs.
+
+Design: [docs/superpowers/specs/2026-07-11-strategic-payload-generator-design.md](superpowers/specs/2026-07-11-strategic-payload-generator-design.md) · Plan: [codex_plans/PLAN-3.md](../codex_plans/PLAN-3.md)
 
 ## One-click flow (recommended)
 
 1. Set `APIFY_TOKEN` in `.env`.
 2. Create a project with plain-English ICP + optional geography + volume (25–2000).
-3. Optional: regenerate plan or send feedback (`POST /api/projects/:id/lead-plan/...`).
-4. Click **Find leads** (`POST /api/projects/:id/ingest`) — uses the stored plan, not user JSON.
-5. Inspect Activity via `GET /api/projects/:id/discovery/latest`.
+3. In **Project settings**, pick **Enabled lead sources** (Maps, Wellfound, Google Search, LinkedIn jobs). Agency default: Maps + Wellfound.
+4. Optional: regenerate plan or send feedback (`POST /api/projects/:id/lead-plan/...`).
+5. Optional: create a **Lead list** for a new campaign (keeps prior hunts intact).
+6. Click **Find leads** (`POST /api/projects/:id/ingest`).
+7. Inspect **Operations** via `GET /api/projects/:id/discovery/latest` (or pick a past run).
 
 Planner env (isolated from scoring):
 
@@ -17,6 +26,39 @@ HERMES_PLAN_MODEL=hermes-lead-planner
 HERMES_PLAN_API_BASE=   # optional; defaults to HERMES_API_BASE
 HERMES_PLAN_API_KEY=    # optional; defaults to HERMES_API_KEY
 ```
+
+## Actor catalog
+
+| Key | Actor ID | Best for |
+|-----|----------|----------|
+| `google_maps` | `compass/crawler-google-places` | Local SMBs |
+| `google_search` | `apify/google-search-scraper` | Narrow intent queries only |
+| `wellfound_startups` | `radeance/wellfound-job-listings-scraper` | US startups / hiring |
+| `linkedin_jobs` | `curious_coder/linkedin-jobs-scraper` | Role-intent / hiring |
+
+Catalog code: [`src/discovery/actor-catalog.ts`](../src/discovery/actor-catalog.ts). Hermes may only pick keys from the project's `lead_strategy.enabledActorKeys`.
+
+## Lead lists
+
+Within a project:
+
+- `GET/POST /api/projects/:id/lead-lists`
+- `POST .../lead-lists/:listId/activate`
+- `POST .../lead-lists/:listId/clear`
+- `DELETE .../lead-lists/:listId`
+
+Leads, discovery runs, and Operations history are scoped to the **active** list. Domain dedupe is per-list.
+
+## Operations Console APIs
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET .../discovery/latest` | Full observability for active list's latest run |
+| `GET .../discovery/runs` | Last 10 runs (picker) |
+| `GET .../discovery/runs/:runId` | Full detail for one run |
+| `GET .../lead-plan` | Plan + strategy + website summary |
+
+Snapshot columns on `discovery_runs`: `planner_input_json`, `planner_raw_json`, `payload_json`, `compiled_jobs_json`, `validation_notes`.
 
 ## Environment
 
@@ -31,108 +73,37 @@ LEADFINDING_MAX_APIFY_JOBS=10
 
 ## Advanced: project `source_config.leadFinding`
 
-Legacy / scripted runs can still pass explicit Apify sources in `source_config` (not shown in the dashboard UI):
-
-```json
-{
-  "leadFinding": {
-    "mode": "apify_first",
-    "maxCandidates": 500,
-    "maxApifyJobs": 10,
-    "maxRuntimeSecondsPerJob": 600,
-    "concurrency": 2,
-    "sources": [
-      {
-        "id": "google-maps-restaurants-nyc",
-        "type": "apify",
-        "enabled": true,
-        "actorId": "compass/crawler-google-places",
-        "input": {
-          "searchStringsArray": ["restaurants in New York"],
-          "maxCrawledPlacesPerSearch": 100
-        },
-        "mapping": {
-          "companyField": "title",
-          "websiteField": "website",
-          "sourceUrlField": "url"
-        }
-      }
-    ]
-  }
-}
-```
-
-### Required mapping fields
-
-| Field | Required | Purpose |
-|-------|----------|---------|
-| `companyField` | yes | Actor dataset path for company name (dot paths allowed, e.g. `place.name`) |
-| `websiteField` | yes | Path for company website |
-| `sourceUrlField` | no | Path for listing/profile URL |
-| `locationField` | no | Reserved for future enrichment |
-| `categoryField` | no | Reserved for future enrichment |
-
-Use `taskId` instead of `actorId` when running a saved Apify task:
-
-```json
-{
-  "id": "my-task",
-  "type": "apify",
-  "taskId": "username/task-name",
-  "mapping": {
-    "companyField": "name",
-    "websiteField": "website",
-    "sourceUrlField": "url"
-  }
-}
-```
-
-Set `allowCompanyOnly: true` only when the actor legitimately returns companies without websites.
-
-## Source packs
-
-If `sources` is empty but `pack` is set (or inferred later from ICP), starter templates are used. Pack IDs:
-
-- `local_business`
-- `saas_startup`
-- `ecommerce`
-- `b2b_general`
-- `hiring_intent`
-
-Pack actor IDs are **examples**. Replace them with verified [Apify Store](https://apify.com/store) actors or your own tasks before production spend.
-
-Query templates support `{{niche}}`, `{{category}}`, `{{city}}`, and `{{role}}`.
+Legacy / scripted runs can still pass explicit Apify sources in `source_config` (not shown in the dashboard UI). Prefer strategic payload + enabled sources for dashboard Find leads.
 
 ## Find leads behavior
 
-Dashboard **Find leads** (`POST /api/projects/:id/ingest`):
-
-1. Ensure / load the project **lead plan**.
-2. Compile plan → Apify jobs (Google search + Maps templates).
-3. Run discovery; write `discovery_runs` / jobs / candidates; insert kept leads.
-
-Discovery response includes:
-
-- `runId`, `plan`, `sourcesRun`, `fetched`, `kept`, `rejected`, `duplicates`, `skippedExisting`, `costEstimate`, `errors[]`
-
-One failed Apify job does not fail the whole run; its error is recorded in `errors` and `discovery_source_jobs`.
+1. Refresh cached `website_summary` if stale (>7 days).
+2. If the list plan is **ready**, Find leads **executes the locked stored payload** (same hunt contract). Check **Force replan** to regenerate with Hermes.
+3. On **Force replan**, a compact **revision brief** from the latest completed list hunt (job summaries, fetch/keep/reject stats, top rejection reasons, circuit-breaker flag) is added to the Hermes prompt so the new plan can avoid repeating junk patterns. No raw leads are sent. If there is no prior completed run, replan behaves like a fresh generate.
+4. Otherwise Hermes generates a strategic payload from ICP + enabled actors + feedback.
+5. Validator allowlists actors, applies negatives, caps volume; falls back if needed.
+6. Run Apify jobs sequentially with a **quality circuit breaker** (stops further jobs if junk ratio is too high).
+7. **Hard Shield** drops known junk (media, platforms, directories, gov/edu, listicles).
+8. **Buyer Evidence Gate** scores survivors → `gated` (fit), `provisional` (maybe), or reject.
+9. Insert kept leads into the active lead list; store observability snapshots.
+10. Reject / discard flywheel appends domains and note tokens to list plan negatives.
 
 ## Guardrails
 
 - Volume steps: `25 / 50 / 100 / 250 / 500 / 1000 / 2000`
-- Default max Apify jobs: `10`
-- Default concurrency: `2`
-- Default actor timeout: `10 minutes`
-- Raw payloads are stored capped (~8KB) on `discovered_candidates`
-- Noise filter drops social hosts, directories, job boards, and empty companies
-- Dedupes by canonical domain (fallback: normalized company name)
+- Max jobs per payload: 3–6 by volume
+- Hard shield drops social hosts, directories, job boards, vendor/media/platforms, gov/edu, and plan negatives
+- Buyer evidence gate quarantines mid-ICP matches as `provisional` (Promote / Discard in UI)
+- Wellfound profile domains allowed only when the job `actorKey` is `wellfound_startups`
+- Dedupes by canonical domain within the active lead list
+- Circuit breaker trips when rejected/(kept+rejected) > 60% after ≥8 decisions
 
 ## Adding a new Apify actor
 
 1. Confirm the actor/task in Apify Console and note sample dataset fields.
-2. Extend `compile-lead-plan.ts` (preferred) or add a `leadFinding.sources[]` entry for scripts.
-3. Click **Find leads** and inspect Activity / `discovery_runs` if mapping looks wrong.
-4. Tighten `input` limits (`maxItems`, places per search) before raising budgets.
+2. Add an entry to `actor-catalog.ts` with mapping + `descriptionForPlanner`.
+3. Enable the key on a project and run Find leads; inspect Operations Console.
+4. Tighten input limits before raising budgets.
 
 ## Official Apify references
 

@@ -58,6 +58,22 @@
     <button id="btn-new-project" type="button" class="ghost">New project</button>
   </section>
 
+  <div class="workspace">
+    <aside class="list-sidebar" id="list-sidebar" aria-label="Lead lists">
+      <div class="list-sidebar-head">
+        <h2 class="list-sidebar-title">Lead lists</h2>
+        <button id="btn-new-list" type="button" class="ghost tiny" disabled>+ New</button>
+      </div>
+      <div id="list-sidebar-cards" class="list-sidebar-cards"></div>
+      <div class="list-sidebar-foot">
+        <button id="btn-list-settings" type="button" class="ghost tiny" disabled>Settings</button>
+        <button id="btn-clear-list" type="button" class="ghost tiny" disabled>Clear</button>
+        <button id="btn-delete-list" type="button" class="ghost tiny" disabled>Delete</button>
+      </div>
+      <select id="lead-list-select" class="visually-hidden" disabled aria-hidden="true" tabindex="-1"></select>
+    </aside>
+
+    <div class="workspace-main">
   <section id="kpis" class="kpis">
     <div class="kpi">
       <span class="kpi-label">Total leads</span>
@@ -78,51 +94,74 @@
   </section>
 
   <section class="ops">
-    <button id="btn-find-leads" type="button" class="primary">Find leads</button>
-    <button id="btn-project-settings" type="button" class="ghost">Project settings</button>
+    <button id="btn-find-leads" type="button" class="primary" disabled title="Select a list with a ready plan">Find leads</button>
+    <label class="check-inline" title="Ignore locked plan and regenerate with Hermes">
+      <input id="force-replan" type="checkbox" />
+      Force replan
+    </label>
+    <button id="btn-enrich-companies" type="button">Enrich companies</button>
+    <button id="btn-find-contacts" type="button">Find contacts</button>
+    <button id="btn-score" type="button">Run scoring</button>
+    <button id="btn-export-emails" type="button">Export Emails</button>
+    <button id="btn-export-all" type="button">Export All</button>
     <label class="file-btn">
       Import CSV
       <input id="import-file" type="file" accept=".csv,text/csv" />
     </label>
-    <button id="btn-export-all" type="button">Export All</button>
-    <button id="btn-export-emails" type="button">Export Emails</button>
-    <details class="more-ops">
-      <summary>More</summary>
-      <div class="more-ops-panel">
-        <button id="btn-enrich-companies" type="button">Enrich companies</button>
-        <button id="btn-score" type="button">Run scoring</button>
-      </div>
-    </details>
+    <button id="btn-project-settings" type="button" class="ghost">Project settings</button>
     <span class="ops-spacer"></span>
     <button id="btn-shortcuts" type="button" class="shortcut-hint-btn ghost" title="Keyboard shortcuts">?</button>
   </section>
 
   <section class="plan-activity">
     <article id="lead-plan-card" class="panel-card">
-      <div class="panel-card-head">
-        <h2>Lead plan</h2>
-        <span id="lead-plan-status" class="muted">—</span>
+      <div class="panel-card-head plan-card-head">
+        <div class="plan-card-head-text">
+          <h2>Lead plan for: <span id="lead-plan-list-name">—</span></h2>
+          <p id="lead-plan-hint" class="muted plan-hint">Find leads will use this exact plan.</p>
+        </div>
+        <span id="lead-plan-state" class="plan-state-chip muted">—</span>
       </div>
+      <p id="lead-plan-stale-banner" class="plan-stale-banner hidden" role="status"></p>
+      <p id="lead-plan-last-generated" class="muted plan-last-generated"></p>
       <p id="lead-plan-goal" class="plan-goal">Create or open a project to draft a plan.</p>
+      <p id="lead-plan-focus" class="muted plan-focus"></p>
+      <p id="lead-plan-empty" class="plan-empty hidden"></p>
       <dl id="lead-plan-meta" class="plan-meta muted"></dl>
+      <p id="lead-plan-sources" class="muted plan-sources"></p>
       <ul id="lead-plan-angles" class="plan-angles"></ul>
+      <h3 class="plan-section-label">Apify jobs</h3>
+      <div id="lead-plan-jobs" class="plan-jobs"></div>
       <div class="plan-actions">
         <button id="btn-regen-plan" type="button" class="ghost" disabled>Regenerate plan</button>
+        <button id="btn-refresh-website" type="button" class="ghost" disabled>Refresh from website</button>
       </div>
       <label class="plan-feedback">
-        Feedback for next plan
-        <textarea id="lead-plan-feedback" rows="2" placeholder="e.g. more local restaurants, focus on funded startups…" disabled></textarea>
+        Feedback for this list's plan
+        <textarea id="lead-plan-feedback" rows="2" placeholder="e.g. more local restaurants, focus on funded startups for this list…" disabled></textarea>
       </label>
       <button id="btn-plan-feedback" type="button" class="ghost" disabled>Apply feedback</button>
     </article>
-    <article id="activity-card" class="panel-card">
+    <article id="ops-console-card" class="panel-card">
       <div class="panel-card-head">
-        <h2>Activity</h2>
-        <button id="btn-refresh-activity" type="button" class="ghost tiny" disabled>Refresh</button>
+        <h2>Operations</h2>
+        <div class="ops-console-actions">
+          <select id="ops-type-filter" class="ops-type-filter" disabled>
+            <option value="all">All steps</option>
+            <option value="discovery">Discovery</option>
+            <option value="enrichment">Enrichment</option>
+            <option value="contacts">Contacts</option>
+            <option value="scoring">Scoring</option>
+          </select>
+          <select id="ops-run-select" disabled></select>
+          <button id="btn-refresh-activity" type="button" class="ghost tiny" disabled>Refresh</button>
+        </div>
       </div>
       <p id="activity-summary" class="muted">No discovery runs yet.</p>
       <ol id="activity-timeline" class="activity-timeline"></ol>
+      <div id="ops-fields" class="ops-fields"></div>
       <div id="activity-rejected" class="activity-rejected hidden"></div>
+      <div id="activity-kept" class="activity-kept hidden"></div>
     </article>
   </section>
 
@@ -132,6 +171,7 @@
       <select id="filter-status">
         <option value="">All</option>
         <option value="gated">gated</option>
+        <option value="provisional">provisional</option>
         <option value="scored">scored</option>
         <option value="approved">approved</option>
         <option value="rejected">rejected</option>
@@ -158,6 +198,8 @@
             <th>Email</th>
             <th>Score</th>
             <th>Status</th>
+            <th>Enriched</th>
+            <th>Contacts</th>
             <th>Sources</th>
           </tr>
         </thead>
@@ -172,9 +214,20 @@
         <h3 id="detail-company"></h3>
         <div id="detail-meta" class="detail-meta"></div>
         <pre id="detail-reasons"></pre>
+        <div id="detail-profile-section" class="detail-contacts hidden">
+          <p class="detail-contacts-label">🏢 Company Profile & Enrichment</p>
+          <div id="detail-profile-content" style="font-size: 0.85rem; line-height: 1.4; opacity: 0.9;"></div>
+        </div>
+        <div id="detail-contacts-section" class="detail-contacts hidden">
+          <p class="detail-contacts-label">👤 Contacts</p>
+          <ul id="detail-contacts-list" class="detail-contacts-list"></ul>
+        </div>
         <div class="detail-actions">
+
           <button id="btn-approve" type="button" class="ok">Approve</button>
           <button id="btn-reject" type="button" class="bad">Reject</button>
+          <button id="btn-promote" type="button" class="ghost hidden">Promote</button>
+          <button id="btn-discard" type="button" class="ghost danger hidden">Discard</button>
         </div>
         <label>
           Notes
@@ -183,6 +236,8 @@
       </div>
     </aside>
   </main>
+    </div>
+  </div>
 
   <div id="new-project-backdrop" class="dialog-backdrop" role="presentation" inert>
     <div class="dialog dialog-wide" role="dialog" aria-labelledby="new-project-title" aria-modal="true">
@@ -234,7 +289,7 @@
   <div id="settings-backdrop" class="dialog-backdrop" role="presentation" inert>
     <div class="dialog dialog-wide" role="dialog" aria-labelledby="settings-title" aria-modal="true">
       <h2 id="settings-title">Project settings</h2>
-      <p class="dialog-desc">Update ICP, geography, and volume. Find leads uses Apify from your lead plan.</p>
+      <p class="dialog-desc">Agency identity and default hunt settings for the Project list.</p>
       <form id="settings-form">
         <div class="dialog-fields">
           <label>
@@ -269,10 +324,104 @@
               <option value="2000">2000</option>
             </select>
           </label>
+          <fieldset class="enabled-sources">
+            <legend>Enabled lead sources</legend>
+            <div id="settings-enabled-sources" class="checkbox-grid"></div>
+          </fieldset>
         </div>
         <div class="dialog-actions">
-          <button id="btn-cancel-settings" type="button" class="ghost">Cancel</button>
-          <button type="submit" class="primary">Save</button>
+          <button id="btn-delete-project" type="button" class="ghost danger" disabled>Delete project</button>
+          <div class="dialog-actions-end">
+            <button id="btn-cancel-settings" type="button" class="ghost">Cancel</button>
+            <button type="submit" class="primary">Save</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="new-list-backdrop" class="dialog-backdrop" role="presentation" inert>
+    <div class="dialog" role="dialog" aria-labelledby="new-list-title" aria-modal="true">
+      <h2 id="new-list-title">New lead list</h2>
+      <p class="dialog-desc">Define hunt focus — we'll generate this list's first plan immediately.</p>
+      <form id="new-list-form">
+        <div class="dialog-fields">
+          <label>
+            Name
+            <input name="name" placeholder="e.g. NFT startups 200" required autocomplete="off" />
+          </label>
+          <label>
+            Description (hunt focus)
+            <input name="description" placeholder="What type of leads? e.g. startups needing mobile app builds" autocomplete="off" />
+          </label>
+          <label>
+            Geography (optional)
+            <input name="geography" placeholder="e.g. Austin, TX or DACH" autocomplete="off" />
+          </label>
+          <label>
+            Target volume
+            <select name="volumeTarget">
+              <option value="25">25</option>
+              <option value="50">50</option>
+              <option value="100" selected>100</option>
+              <option value="250">250</option>
+              <option value="500">500</option>
+              <option value="1000">1000</option>
+              <option value="2000">2000</option>
+            </select>
+          </label>
+          <fieldset class="enabled-sources">
+            <legend>Enabled lead sources</legend>
+            <div id="new-list-enabled-sources" class="checkbox-grid"></div>
+          </fieldset>
+        </div>
+        <div class="dialog-actions">
+          <button id="btn-cancel-list" type="button" class="ghost">Cancel</button>
+          <button type="submit" class="primary">Create list &amp; plan</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="list-settings-backdrop" class="dialog-backdrop" role="presentation" inert>
+    <div class="dialog dialog-wide" role="dialog" aria-labelledby="list-settings-title" aria-modal="true">
+      <h2 id="list-settings-title">List settings</h2>
+      <p class="dialog-desc">Hunt config for this list. On Project list, empty fields use project defaults. Other lists use these settings only.</p>
+      <form id="list-settings-form">
+        <div class="dialog-fields">
+          <label>
+            Name
+            <input name="name" required autocomplete="off" />
+          </label>
+          <label>
+            Description (hunt focus)
+            <input name="description" placeholder="What type of leads? e.g. startups needing mobile app builds" autocomplete="off" />
+          </label>
+          <label>
+            Geography (optional)
+            <input name="geography" placeholder="e.g. Austin, TX or DACH" autocomplete="off" />
+          </label>
+          <label>
+            Target volume
+            <select name="volumeTarget">
+              <option value="25">25</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+              <option value="250">250</option>
+              <option value="500">500</option>
+              <option value="1000">1000</option>
+              <option value="2000">2000</option>
+            </select>
+          </label>
+          <fieldset class="enabled-sources">
+            <legend>Enabled lead sources</legend>
+            <div id="list-settings-enabled-sources" class="checkbox-grid"></div>
+          </fieldset>
+        </div>
+        <div class="dialog-actions">
+          <button id="btn-cancel-list-settings" type="button" class="ghost">Cancel</button>
+          <button type="submit" name="saveAction" value="save" class="ghost">Save</button>
+          <button type="submit" name="saveAction" value="regenerate" class="primary">Save &amp; regenerate plan</button>
         </div>
       </form>
     </div>

@@ -6,13 +6,32 @@ CREATE TABLE IF NOT EXISTS projects (
   icp TEXT,
   source_config TEXT,
   lead_plan TEXT,
+  lead_strategy TEXT,
+  website_summary TEXT,
+  website_summary_at TEXT,
+  active_lead_list_id INTEGER,
   status TEXT NOT NULL DEFAULT 'active',
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS lead_lists (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT,
+  lead_plan TEXT,
+  payload_json TEXT,
+  compiled_jobs_json TEXT,
+  plan_updated_at TEXT,
+  plan_context_hash TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (project_id) REFERENCES projects(id)
 );
 
 CREATE TABLE IF NOT EXISTS leads (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   project_id INTEGER NOT NULL,
+  lead_list_id INTEGER,
   company TEXT NOT NULL,
   website TEXT,
   canonical_domain TEXT,
@@ -23,20 +42,23 @@ CREATE TABLE IF NOT EXISTS leads (
   score INTEGER,
   reasons TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  FOREIGN KEY (project_id) REFERENCES projects(id)
+  FOREIGN KEY (project_id) REFERENCES projects(id),
+  FOREIGN KEY (lead_list_id) REFERENCES lead_lists(id)
 );
 
 CREATE TABLE IF NOT EXISTS feedback (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   project_id INTEGER NOT NULL,
   lead_id INTEGER NOT NULL,
+  lead_list_id INTEGER,
   good INTEGER NOT NULL,
   notes TEXT,
   reviewed_by TEXT,
   source TEXT NOT NULL DEFAULT 'dashboard',
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   FOREIGN KEY (project_id) REFERENCES projects(id),
-  FOREIGN KEY (lead_id) REFERENCES leads(id)
+  FOREIGN KEY (lead_id) REFERENCES leads(id),
+  FOREIGN KEY (lead_list_id) REFERENCES lead_lists(id)
 );
 
 CREATE TABLE IF NOT EXISTS users (
@@ -48,10 +70,12 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE INDEX IF NOT EXISTS idx_leads_project ON leads(project_id);
 CREATE INDEX IF NOT EXISTS idx_leads_domain ON leads(project_id, canonical_domain);
+CREATE INDEX IF NOT EXISTS idx_lead_lists_project ON lead_lists(project_id);
 
 CREATE TABLE IF NOT EXISTS discovery_runs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   project_id INTEGER NOT NULL,
+  lead_list_id INTEGER,
   status TEXT NOT NULL DEFAULT 'queued',
   fetched_count INTEGER NOT NULL DEFAULT 0,
   kept_count INTEGER NOT NULL DEFAULT 0,
@@ -59,9 +83,15 @@ CREATE TABLE IF NOT EXISTS discovery_runs (
   rejected_count INTEGER NOT NULL DEFAULT 0,
   cost_estimate REAL,
   error TEXT,
+  planner_input_json TEXT,
+  planner_raw_json TEXT,
+  payload_json TEXT,
+  compiled_jobs_json TEXT,
+  validation_notes TEXT,
   started_at TEXT NOT NULL DEFAULT (datetime('now')),
   finished_at TEXT,
-  FOREIGN KEY (project_id) REFERENCES projects(id)
+  FOREIGN KEY (project_id) REFERENCES projects(id),
+  FOREIGN KEY (lead_list_id) REFERENCES lead_lists(id)
 );
 
 CREATE TABLE IF NOT EXISTS discovery_source_jobs (
@@ -207,3 +237,48 @@ CREATE INDEX IF NOT EXISTS idx_enrichment_jobs_run ON company_enrichment_jobs(ru
 CREATE INDEX IF NOT EXISTS idx_company_pages_run ON company_pages(run_id);
 CREATE INDEX IF NOT EXISTS idx_company_profiles_project_domain ON company_profiles(project_id, domain);
 CREATE INDEX IF NOT EXISTS idx_company_evidence_domain ON company_evidence(project_id, domain);
+
+CREATE TABLE IF NOT EXISTS contacts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id INTEGER NOT NULL,
+  lead_id INTEGER NOT NULL,
+  domain TEXT NOT NULL,
+  full_name TEXT NOT NULL,
+  title TEXT,
+  linkedin_url TEXT,
+  email TEXT,
+  confidence REAL NOT NULL DEFAULT 0,
+  source TEXT NOT NULL DEFAULT 'linkedin',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (project_id) REFERENCES projects(id),
+  FOREIGN KEY (lead_id) REFERENCES leads(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_contacts_lead ON contacts(lead_id);
+CREATE INDEX IF NOT EXISTS idx_contacts_domain ON contacts(project_id, domain);
+
+CREATE TABLE IF NOT EXISTS operations_runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id INTEGER NOT NULL,
+  run_type TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'running',
+  progress_info TEXT,
+  error TEXT,
+  started_at TEXT NOT NULL DEFAULT (datetime('now')),
+  finished_at TEXT,
+  FOREIGN KEY (project_id) REFERENCES projects(id)
+);
+
+CREATE TABLE IF NOT EXISTS operations_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id INTEGER NOT NULL,
+  message TEXT NOT NULL,
+  level TEXT NOT NULL DEFAULT 'info',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (run_id) REFERENCES operations_runs(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ops_runs_project ON operations_runs(project_id);
+CREATE INDEX IF NOT EXISTS idx_ops_logs_run ON operations_logs(run_id);
+
+

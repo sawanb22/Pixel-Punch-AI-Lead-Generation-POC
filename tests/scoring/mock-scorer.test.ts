@@ -6,6 +6,7 @@ function makeLead(overrides: Partial<Lead> = {}): Lead {
   return {
     id: 1,
     projectId: 1,
+    leadListId: null,
     company: "Acme SaaS",
     website: "acme.com",
     canonicalDomain: "acme.com",
@@ -30,6 +31,10 @@ function makeProject(overrides: Partial<Project> = {}): Project {
     icp: "saas b2b",
     sourceConfig: null,
     leadPlan: null,
+    leadStrategy: null,
+    websiteSummary: null,
+    websiteSummaryAt: null,
+    activeLeadListId: null,
     status: "active",
     createdAt: "2026-01-01",
     ...overrides,

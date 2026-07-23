@@ -1,0 +1,9 @@
+node_modules/
+dist/
+*.db
+*.db-shm
+*.db-wal
+.env
+.DS_Store
+data/rag/
+data/rag-e2e-verify/

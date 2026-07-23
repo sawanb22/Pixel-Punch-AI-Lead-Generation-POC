@@ -1,0 +1,43 @@
+{
+  "name": "leadradar",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "import-csv": "tsx src/cli/import-csv.ts",
+    "ingest": "tsx src/cli/ingest-project.ts",
+    "mcp": "tsx src/mcp/server.ts",
+    "score": "tsx src/cli/score-project.ts",
+    "top-picks": "tsx src/cli/top-picks.ts",
+    "rag:rebuild": "tsx src/cli/rag-rebuild.ts",
+    "dashboard": "tsx src/dashboard/server.ts",
+    "dashboard:dev": "tsx scripts/run-dashboard-dev.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "express": "^5.2.1",
+    "express-session": "^1.19.0",
+    "multer": "^2.2.0",
+    "papaparse": "^5.4.1",
+    "passport": "^0.7.0",
+    "passport-google-oauth20": "^2.0.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/express-session": "^1.19.0",
+    "@types/multer": "^2.2.0",
+    "@types/node": "^22.0.0",
+    "@types/papaparse": "^5.3.14",
+    "@types/passport": "^1.0.17",
+    "@types/passport-google-oauth20": "^2.0.17",
+    "@types/supertest": "^7.2.0",
+    "supertest": "^7.2.2",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}

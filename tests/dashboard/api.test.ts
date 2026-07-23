@@ -6,11 +6,13 @@ import { tmpdir } from "node:os";
 import { openDatabase, type DB } from "../../src/db/database.js";
 import { createApp } from "../../src/dashboard/app.js";
 import { MockScorer } from "../../src/scoring/mock-scorer.js";
-import { insertLeads, listLeads } from "../../src/leads/leads.repo.js";
-import { createProject } from "../../src/projects/projects.repo.js";
+import { insertLeads, listLeads, listGatedLeads } from "../../src/leads/leads.repo.js";
+import { createProject, getProject } from "../../src/projects/projects.repo.js";
+import { getActiveLeadListId, listLeadLists } from "../../src/leads/lead-lists.repo.js";
 import { isAllowlisted } from "../../src/users/users.repo.js";
-import { resetDefaultFeedbackRag } from "../../src/feedback/feedback.repo.js";
+import { resetDefaultFeedbackRag, recordFeedback } from "../../src/feedback/feedback.repo.js";
 import { defaultAgencyLeadPlan } from "../../src/discovery/lead-plan.js";
+import { defaultStrategicPayload } from "../../src/discovery/strategic-payload.js";
 import type { HermesLeadPlanner } from "../../src/discovery/hermes-lead-planner.js";
 
 const mockLeadPlanner = {
@@ -20,7 +22,26 @@ const mockLeadPlanner = {
       fromFallback: true,
     };
   },
-} as Pick<HermesLeadPlanner, "generatePlan"> as HermesLeadPlanner;
+  async generateStrategicPayload(input) {
+    const payload = defaultStrategicPayload(input);
+    if (input.listFocus) {
+      payload.goal = `List plan: ${input.listFocus}`;
+    }
+    return {
+      payload,
+      raw: null,
+      fromFallback: true,
+      plannerInput: {
+        name: input.name,
+        enabledActorKeys: input.enabledActorKeys,
+        listFocus: input.listFocus ?? null,
+      },
+    };
+  },
+} as Pick<
+  HermesLeadPlanner,
+  "generatePlan" | "generateStrategicPayload"
+> as HermesLeadPlanner;
 
 describe("dashboard API", () => {
   let db: DB;
@@ -188,8 +209,9 @@ describe("dashboard API", () => {
       volumeTarget: 100,
     });
     expect(created.status).toBe(201);
-    expect(created.body.leadPlan).toBeTruthy();
     const projectId = created.body.id as number;
+    const initialPlan = await agent.get(`/api/projects/${projectId}/lead-plan`);
+    expect(initialPlan.body.plan).toBeTruthy();
 
     const patched = await agent.patch(`/api/projects/${projectId}`).send({
       icp: "AI agents for restaurants",
@@ -197,7 +219,8 @@ describe("dashboard API", () => {
     });
     expect(patched.status).toBe(200);
     expect(patched.body.icp).toBe("AI agents for restaurants");
-    expect(patched.body.leadPlan).toContain("250");
+    const planAfter = await agent.get(`/api/projects/${projectId}/lead-plan`);
+    expect(planAfter.body.plan.volumeTarget).toBe(250);
   });
 
   it("ingest returns 400 when APIFY_TOKEN missing for Find leads", async () => {
@@ -231,10 +254,12 @@ describe("dashboard API", () => {
         items: [
           {
             title: "Dash Co",
+            website: "https://dash.example",
             url: "https://dash.example",
           },
           {
             title: "Noise",
+            website: "https://linkedin.com/company/noise",
             url: "https://linkedin.com/company/noise",
           },
         ],
@@ -260,10 +285,12 @@ describe("dashboard API", () => {
       volumeTarget: 50,
     });
     expect(created.status).toBe(201);
-    expect(created.body.leadPlan).toBeTruthy();
+    const projectId = created.body.id as number;
+    const initialPlan = await agent.get(`/api/projects/${projectId}/lead-plan`);
+    expect(initialPlan.body.plan).toBeTruthy();
 
     const ingested = await agent.post(
-      `/api/projects/${created.body.id}/ingest`
+      `/api/projects/${projectId}/ingest`
     );
     expect(ingested.status).toBe(201);
     expect(ingested.body.runId).toBeGreaterThan(0);
@@ -356,6 +383,586 @@ describe("dashboard API", () => {
     );
     expect(getCompanyProfile(db, p1.body.id, "scoped.example")).toBeTruthy();
     expect(getCompanyProfile(db, p1.body.id, "other.example")).toBeUndefined();
+  });
+
+  it("lead lists: create, list, activate, clear, delete", async () => {
+    const agent = request(app());
+
+    const created = await agent.post("/api/projects").send({
+      name: "List Test Co",
+      icp: "agency clients",
+    });
+    expect(created.status).toBe(201);
+    const projectId = created.body.id as number;
+
+    const initial = await agent.get(`/api/projects/${projectId}/lead-lists`);
+    expect(initial.status).toBe(200);
+    expect(initial.body.lists).toHaveLength(1);
+    expect(initial.body.activeLeadListId).toBeTruthy();
+    const defaultListId = initial.body.activeLeadListId as number;
+
+    insertLeads(db, projectId, [
+      {
+        company: "Default Co",
+        website: "https://default.example",
+        canonicalDomain: "default.example",
+        email: null,
+        votes: null,
+        source: "test",
+        sources: ["test"],
+      },
+    ]);
+
+    const createdList = await agent
+      .post(`/api/projects/${projectId}/lead-lists`)
+      .send({
+        name: "mobile app build leads",
+        description: "list for mobile apps",
+        activate: true,
+      });
+    expect(createdList.status).toBe(201);
+    expect(createdList.body.list.name).toBe("mobile app build leads");
+    expect(createdList.body.activeLeadListId).toBe(createdList.body.list.id);
+
+    const afterCreate = await agent.get(`/api/projects/${projectId}/lead-lists`);
+    expect(afterCreate.body.lists).toHaveLength(2);
+
+    const listed = await agent.get(`/api/projects/${projectId}/leads`);
+    expect(listed.status).toBe(200);
+    expect(listed.body).toHaveLength(0);
+
+    await agent
+      .post(`/api/projects/${projectId}/lead-lists/${defaultListId}/activate`)
+      .send({});
+    const switched = await agent.get(`/api/projects/${projectId}/leads`);
+    expect(switched.body).toHaveLength(1);
+
+    const cleared = await agent
+      .post(`/api/projects/${projectId}/lead-lists/${defaultListId}/clear`)
+      .send({});
+    expect(cleared.status).toBe(200);
+    expect(cleared.body.deletedLeads).toBeGreaterThanOrEqual(1);
+
+    const deleted = await agent.delete(
+      `/api/projects/${projectId}/lead-lists/${createdList.body.list.id}`
+    );
+    expect(deleted.status).toBe(200);
+    expect(deleted.body.lists).toHaveLength(1);
+  });
+
+  it("lead plan is scoped to active lead list", async () => {
+    const agent = request(app());
+
+    const created = await agent.post("/api/projects").send({
+      name: "Scoped Co",
+      icp: "general agency services",
+    });
+    expect(created.status).toBe(201);
+    const projectId = created.body.id as number;
+
+    const mobileList = await agent
+      .post(`/api/projects/${projectId}/lead-lists`)
+      .send({
+        name: "mobile app build leads",
+        description: "funded startups needing apps",
+        activate: true,
+      });
+    expect(mobileList.status).toBe(201);
+    const mobileListId = mobileList.body.list.id as number;
+
+    const mobilePlan = await agent.post(
+      `/api/projects/${projectId}/lead-plan/generate`
+    );
+    expect(mobilePlan.status).toBe(200);
+    expect(mobilePlan.body.leadListId).toBe(mobileListId);
+    expect(mobilePlan.body.plan.goal).toContain("mobile app build leads");
+
+    const fintechList = await agent
+      .post(`/api/projects/${projectId}/lead-lists`)
+      .send({
+        name: "fintech SMB leads",
+        description: "payment integrations",
+        activate: true,
+      });
+    expect(fintechList.status).toBe(201);
+
+    const fintechPlan = await agent.post(
+      `/api/projects/${projectId}/lead-plan/generate`
+    );
+    expect(fintechPlan.status).toBe(200);
+    expect(fintechPlan.body.plan.goal).toContain("fintech SMB leads");
+
+    await agent
+      .post(`/api/projects/${projectId}/lead-lists/${mobileListId}/activate`)
+      .send({});
+
+    const switched = await agent.get(`/api/projects/${projectId}/lead-plan`);
+    expect(switched.status).toBe(200);
+    expect(switched.body.leadListId).toBe(mobileListId);
+    expect(switched.body.plan.goal).toContain("mobile app build leads");
+    expect(switched.body.plan.goal).not.toContain("fintech SMB leads");
+  });
+
+  it("GET lead-plan returns Apify jobs after generate", async () => {
+    const agent = request(app());
+    const created = await agent.post("/api/projects").send({
+      name: "Jobs Co",
+      icp: "agency builds",
+    });
+    const projectId = created.body.id as number;
+
+    const generated = await agent.post(
+      `/api/projects/${projectId}/lead-plan/generate`
+    );
+    expect(generated.status).toBe(200);
+    expect(Array.isArray(generated.body.jobs)).toBe(true);
+    expect(generated.body.jobs.length).toBeGreaterThan(0);
+    expect(generated.body.jobs[0].actorLabel).toBeTruthy();
+    expect(generated.body.leadListDisplayName).toBe("Project list");
+
+    const fetched = await agent.get(`/api/projects/${projectId}/lead-plan`);
+    expect(fetched.body.jobs.length).toBe(generated.body.jobs.length);
+  });
+
+  it("PATCH lead list settings updates name and description", async () => {
+    const agent = request(app());
+    const created = await agent.post("/api/projects").send({ name: "Patch Co" });
+    const projectId = created.body.id as number;
+
+    const list = await agent
+      .post(`/api/projects/${projectId}/lead-lists`)
+      .send({ name: "mobile apps", description: "startups", activate: true });
+    const listId = list.body.list.id as number;
+
+    const patched = await agent
+      .patch(`/api/projects/${projectId}/lead-lists/${listId}`)
+      .send({ name: "mobile app builds", description: "funded startups" });
+    expect(patched.status).toBe(200);
+    expect(patched.body.list.name).toBe("mobile app builds");
+    expect(patched.body.list.description).toBe("funded startups");
+  });
+
+  it("GET lead-plan returns null plan for list without its own plan", async () => {
+    const agent = request(app());
+    const created = await agent.post("/api/projects").send({
+      name: "Empty List Co",
+      icp: "agency",
+    });
+    const projectId = created.body.id as number;
+
+    await agent.post(`/api/projects/${projectId}/lead-plan/generate`);
+    const lists = await agent.get(`/api/projects/${projectId}/lead-lists`);
+    const defaultListId = lists.body.activeLeadListId as number;
+
+    const other = await agent
+      .post(`/api/projects/${projectId}/lead-lists`)
+      .send({ name: "verify list", description: "smoke", activate: true });
+    expect(other.status).toBe(201);
+
+    const planRes = await agent.get(`/api/projects/${projectId}/lead-plan`);
+    expect(planRes.status).toBe(200);
+    expect(planRes.body.plan).toBeNull();
+    expect(planRes.body.resolvedHuntConfig).toBeTruthy();
+
+    await agent
+      .post(`/api/projects/${projectId}/lead-lists/${defaultListId}/activate`)
+      .send({});
+    const defaultPlan = await agent.get(`/api/projects/${projectId}/lead-plan`);
+    expect(defaultPlan.body.plan).not.toBeNull();
+  });
+
+  it("PATCH project hunt defaults regenerates Default list not active list", async () => {
+    const agent = request(app());
+    const created = await agent.post("/api/projects").send({
+      name: "Default Target Co",
+      icp: "agency",
+      geography: "USA",
+      volumeTarget: 100,
+    });
+    const projectId = created.body.id as number;
+
+    const lists = await agent.get(`/api/projects/${projectId}/lead-lists`);
+    const defaultListId = lists.body.activeLeadListId as number;
+
+    const other = await agent
+      .post(`/api/projects/${projectId}/lead-lists`)
+      .send({ name: "other list", activate: true });
+    const otherListId = other.body.list.id as number;
+
+    await agent.post(`/api/projects/${projectId}/lead-plan/generate`);
+    const otherBefore = await agent.get(`/api/projects/${projectId}/lead-plan`);
+    expect(otherBefore.body.leadListId).toBe(otherListId);
+    const otherGoal = otherBefore.body.plan?.goal;
+
+    await agent.patch(`/api/projects/${projectId}`).send({
+      geography: "DACH",
+      volumeTarget: 250,
+      regeneratePlan: true,
+    });
+
+    await agent
+      .post(`/api/projects/${projectId}/lead-lists/${otherListId}/activate`)
+      .send({});
+    const otherAfter = await agent.get(`/api/projects/${projectId}/lead-plan`);
+    expect(otherAfter.body.plan?.goal).toBe(otherGoal);
+
+    await agent
+      .post(`/api/projects/${projectId}/lead-lists/${defaultListId}/activate`)
+      .send({});
+    const defaultAfter = await agent.get(`/api/projects/${projectId}/lead-plan`);
+    expect(defaultAfter.body.plan).not.toBeNull();
+    expect(defaultAfter.body.resolvedHuntConfig.geography).toBe("DACH");
+  });
+
+  it("PATCH lead list hunt config updates resolved settings", async () => {
+    const agent = request(app());
+    const created = await agent.post("/api/projects").send({ name: "List Hunt Co" });
+    const projectId = created.body.id as number;
+
+    const list = await agent
+      .post(`/api/projects/${projectId}/lead-lists`)
+      .send({ name: "niche list", activate: true });
+    const listId = list.body.list.id as number;
+
+    const patched = await agent
+      .patch(`/api/projects/${projectId}/lead-lists/${listId}`)
+      .send({
+        geography: "UK",
+        volumeTarget: 50,
+        enabledActorKeys: ["wellfound_startups"],
+      });
+    expect(patched.status).toBe(200);
+    expect(patched.body.list.resolvedHuntConfig.geography).toBe("UK");
+    expect(patched.body.list.resolvedHuntConfig.volumeTarget).toBe(50);
+    expect(patched.body.list.resolvedHuntConfig.enabledActorKeys).toEqual([
+      "wellfound_startups",
+    ]);
+  });
+
+  it("plan feedback is isolated per active lead list", async () => {
+    const agent = request(app());
+    const created = await agent.post("/api/projects").send({
+      name: "Feedback Co",
+      icp: "agency",
+    });
+    const projectId = created.body.id as number;
+
+    const initial = await agent.get(`/api/projects/${projectId}/lead-lists`);
+    const defaultListId = initial.body.activeLeadListId as number;
+
+    await agent.post(`/api/projects/${projectId}/lead-plan/feedback`).send({
+      feedback: "focus on mobile startups",
+    });
+
+    const listB = await agent.post(`/api/projects/${projectId}/lead-lists`).send({
+      name: "fintech SMB leads",
+      description: "payments",
+      activate: true,
+    });
+    expect(listB.status).toBe(201);
+
+    await agent.post(`/api/projects/${projectId}/lead-plan/feedback`).send({
+      feedback: "focus on payment integrations only",
+    });
+
+    const planB = await agent.get(`/api/projects/${projectId}/lead-plan`);
+    expect(planB.body.plan.feedbackNotes).toContain("payment integrations");
+
+    await agent
+      .post(`/api/projects/${projectId}/lead-lists/${defaultListId}/activate`)
+      .send({});
+
+    const planA = await agent.get(`/api/projects/${projectId}/lead-plan`);
+    expect(planA.body.plan.feedbackNotes).toContain("mobile startups");
+    expect(planA.body.plan.feedbackNotes).not.toContain("payment integrations");
+  });
+
+  it("stats approval rate is scoped to active lead list", async () => {
+    const agent = request(app());
+    const created = await agent.post("/api/projects").send({ name: "Stats Co" });
+    const projectId = created.body.id as number;
+
+    const lists = await agent.get(`/api/projects/${projectId}/lead-lists`);
+    const defaultListId = lists.body.activeLeadListId as number;
+
+    const listB = await agent.post(`/api/projects/${projectId}/lead-lists`).send({
+      name: "List B",
+      activate: false,
+    });
+    const listBId = listB.body.list.id as number;
+
+    insertLeads(
+      db,
+      projectId,
+      [
+        {
+          company: "A Co",
+          website: "https://a.example",
+          canonicalDomain: "a.example",
+          email: null,
+          votes: null,
+          source: "test",
+          sources: ["test"],
+        },
+      ],
+      defaultListId
+    );
+    insertLeads(
+      db,
+      projectId,
+      [
+        {
+          company: "B Co",
+          website: "https://b.example",
+          canonicalDomain: "b.example",
+          email: null,
+          votes: null,
+          source: "test",
+          sources: ["test"],
+        },
+        {
+          company: "C Co",
+          website: "https://c.example",
+          canonicalDomain: "c.example",
+          email: null,
+          votes: null,
+          source: "test",
+          sources: ["test"],
+        },
+      ],
+      listBId
+    );
+
+    const defaultLeads = listGatedLeads(db, projectId, defaultListId);
+    const bLeads = listGatedLeads(db, projectId, listBId);
+    recordFeedback(db, {
+      projectId,
+      leadId: defaultLeads[0].id,
+      leadListId: defaultListId,
+      good: true,
+      notes: null,
+      reviewedBy: "dev@local",
+      source: "dashboard",
+    });
+    recordFeedback(db, {
+      projectId,
+      leadId: bLeads[0].id,
+      leadListId: listBId,
+      good: false,
+      notes: null,
+      reviewedBy: "dev@local",
+      source: "dashboard",
+    });
+    recordFeedback(db, {
+      projectId,
+      leadId: bLeads[1].id,
+      leadListId: listBId,
+      good: false,
+      notes: null,
+      reviewedBy: "dev@local",
+      source: "dashboard",
+    });
+
+    const statsDefault = await agent.get(`/api/projects/${projectId}/stats`);
+    expect(statsDefault.body.approvalRate).toBe(1);
+
+    await agent
+      .post(`/api/projects/${projectId}/lead-lists/${listBId}/activate`)
+      .send({});
+
+    const statsB = await agent.get(`/api/projects/${projectId}/stats`);
+    expect(statsB.body.approvalRate).toBe(0);
+  });
+
+  it("lead lists: returns JSON 404 when project missing", async () => {
+    const agent = request(app());
+    const res = await agent
+      .post("/api/projects/99999/lead-lists")
+      .send({ name: "ghost list" });
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe("project not found");
+  });
+
+  it("GET /api/version exposes list-scoped API version", async () => {
+    const res = await request(app()).get("/api/version");
+    expect(res.status).toBe(200);
+    expect(res.body.version).toBeGreaterThanOrEqual(2);
+    expect(res.body.features).toContain("list-scoped-routes");
+  });
+
+  it("list-scoped lead-plan never returns another list plan", async () => {
+    const agent = request(app());
+    const created = await agent.post("/api/projects").send({
+      name: "Scoped Routes Co",
+      icp: "agency",
+    });
+    const projectId = created.body.id as number;
+    const lists = await agent.get(`/api/projects/${projectId}/lead-lists`);
+    const defaultListId = lists.body.activeLeadListId as number;
+
+    await agent.post(
+      `/api/projects/${projectId}/lead-lists/${defaultListId}/lead-plan/generate`
+    );
+
+    const other = await agent
+      .post(`/api/projects/${projectId}/lead-lists`)
+      .send({ name: "verify list", description: "smoke", activate: false });
+    const otherListId = other.body.list.id as number;
+
+    const otherPlan = await agent.get(
+      `/api/projects/${projectId}/lead-lists/${otherListId}/lead-plan`
+    );
+    expect(otherPlan.status).toBe(200);
+    expect(otherPlan.body.plan).toBeNull();
+    expect(otherPlan.body.planState).toBe("none");
+    expect(otherPlan.body.leadListId).toBe(otherListId);
+
+    const defaultPlan = await agent.get(
+      `/api/projects/${projectId}/lead-lists/${defaultListId}/lead-plan`
+    );
+    expect(defaultPlan.body.plan).not.toBeNull();
+    expect(defaultPlan.body.leadListId).toBe(defaultListId);
+  });
+
+  it("PATCH list hunt settings marks only that list stale", async () => {
+    const agent = request(app());
+    const created = await agent.post("/api/projects").send({
+      name: "Stale Co",
+      icp: "agency",
+    });
+    const projectId = created.body.id as number;
+
+    const defaultList = await agent.get(`/api/projects/${projectId}/lead-lists`);
+    const defaultListId = defaultList.body.activeLeadListId as number;
+    await agent.post(
+      `/api/projects/${projectId}/lead-lists/${defaultListId}/lead-plan/generate`
+    );
+
+    const other = await agent
+      .post(`/api/projects/${projectId}/lead-lists`)
+      .send({ name: "niche", activate: false });
+    const otherListId = other.body.list.id as number;
+    await agent.post(
+      `/api/projects/${projectId}/lead-lists/${otherListId}/lead-plan/generate`
+    );
+
+    await agent
+      .patch(`/api/projects/${projectId}/lead-lists/${otherListId}`)
+      .send({ description: "changed focus only for niche" });
+
+    const nichePlan = await agent.get(
+      `/api/projects/${projectId}/lead-lists/${otherListId}/lead-plan`
+    );
+    expect(nichePlan.body.planState).toBe("stale");
+
+    const defaultPlan = await agent.get(
+      `/api/projects/${projectId}/lead-lists/${defaultListId}/lead-plan`
+    );
+    expect(defaultPlan.body.planState).toBe("ready");
+  });
+
+  it("Save & regenerate updates only targeted list", async () => {
+    const agent = request(app());
+    const created = await agent.post("/api/projects").send({
+      name: "Regen Co",
+      icp: "agency",
+    });
+    const projectId = created.body.id as number;
+
+    const lists = await agent.get(`/api/projects/${projectId}/lead-lists`);
+    const defaultListId = lists.body.activeLeadListId as number;
+    await agent.post(
+      `/api/projects/${projectId}/lead-lists/${defaultListId}/lead-plan/generate`
+    );
+    const defaultBefore = await agent.get(
+      `/api/projects/${projectId}/lead-lists/${defaultListId}/lead-plan`
+    );
+
+    const other = await agent
+      .post(`/api/projects/${projectId}/lead-lists`)
+      .send({ name: "other", activate: false });
+    const otherListId = other.body.list.id as number;
+
+    await agent
+      .patch(`/api/projects/${projectId}/lead-lists/${otherListId}`)
+      .send({
+        description: "new niche",
+        regeneratePlan: true,
+      });
+
+    const otherPlan = await agent.get(
+      `/api/projects/${projectId}/lead-lists/${otherListId}/lead-plan`
+    );
+    expect(otherPlan.body.plan).not.toBeNull();
+    expect(otherPlan.body.planState).toBe("ready");
+
+    const defaultAfter = await agent.get(
+      `/api/projects/${projectId}/lead-lists/${defaultListId}/lead-plan`
+    );
+    expect(defaultAfter.body.plan?.goal).toBe(defaultBefore.body.plan?.goal);
+  });
+
+  it("list-scoped ingest rejects when plan is not ready", async () => {
+    const agent = request(app());
+    const created = await agent.post("/api/projects").send({
+      name: "Ingest Gate Co",
+      icp: "agency",
+    });
+    const projectId = created.body.id as number;
+
+    const other = await agent
+      .post(`/api/projects/${projectId}/lead-lists`)
+      .send({ name: "empty list", activate: false });
+    const otherListId = other.body.list.id as number;
+
+    const blocked = await agent.post(
+      `/api/projects/${projectId}/lead-lists/${otherListId}/ingest`
+    );
+    expect(blocked.status).toBe(400);
+    expect(blocked.body.error).toMatch(/plan/i);
+  });
+
+  it("DELETE /projects/:id removes project and related data", async () => {
+    const agent = request(app());
+    const project = createProject(db, { name: "To Delete" });
+    const listId = getActiveLeadListId(db, project.id);
+    insertLeads(
+      db,
+      project.id,
+      [
+        {
+          company: "Acme Co",
+          website: "https://acme.example",
+          canonicalDomain: "acme.example",
+          email: null,
+          votes: 1,
+          source: "test",
+          sources: ["test"],
+        },
+      ],
+      listId
+    );
+
+    expect(listLeads(db, project.id).length).toBe(1);
+    expect(listLeadLists(db, project.id).length).toBeGreaterThan(0);
+
+    const del = await agent.delete(`/api/projects/${project.id}`);
+    expect(del.status).toBe(200);
+    expect(del.body.ok).toBe(true);
+    expect(getProject(db, project.id)).toBeUndefined();
+    expect(listLeads(db, project.id).length).toBe(0);
+    expect(listLeadLists(db, project.id).length).toBe(0);
+
+    const listed = await agent.get("/api/projects");
+    expect(listed.body.some((p: { id: number }) => p.id === project.id)).toBe(
+      false
+    );
+  });
+
+  it("DELETE /projects/:id returns 404 for missing project", async () => {
+    const res = await request(app()).delete("/api/projects/99999");
+    expect(res.status).toBe(404);
+    expect(res.body.error).toMatch(/not found/i);
   });
 
   it("isAllowlisted rejects non-listed email", () => {

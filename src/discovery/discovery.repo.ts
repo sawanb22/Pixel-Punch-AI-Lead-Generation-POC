@@ -12,6 +12,7 @@ import {
 interface DiscoveryRunRow {
   id: number;
   project_id: number;
+  lead_list_id?: number | null;
   status: string;
   fetched_count: number;
   kept_count: number;
@@ -19,6 +20,11 @@ interface DiscoveryRunRow {
   rejected_count: number;
   cost_estimate: number | null;
   error: string | null;
+  planner_input_json?: string | null;
+  planner_raw_json?: string | null;
+  payload_json?: string | null;
+  compiled_jobs_json?: string | null;
+  validation_notes?: string | null;
   started_at: string;
   finished_at: string | null;
 }
@@ -63,6 +69,7 @@ function toRun(row: DiscoveryRunRow): DiscoveryRun {
   return {
     id: row.id,
     projectId: row.project_id,
+    leadListId: row.lead_list_id ?? null,
     status: row.status as DiscoveryRunStatus,
     fetchedCount: row.fetched_count,
     keptCount: row.kept_count,
@@ -70,6 +77,11 @@ function toRun(row: DiscoveryRunRow): DiscoveryRun {
     rejectedCount: row.rejected_count,
     costEstimate: row.cost_estimate,
     error: row.error,
+    plannerInputJson: row.planner_input_json ?? null,
+    plannerRawJson: row.planner_raw_json ?? null,
+    payloadJson: row.payload_json ?? null,
+    compiledJobsJson: row.compiled_jobs_json ?? null,
+    validationNotes: row.validation_notes ?? null,
     startedAt: row.started_at,
     finishedAt: row.finished_at,
   };
@@ -141,14 +153,34 @@ export function serializeRawPayload(payload: unknown): string | null {
 
 export function createDiscoveryRun(
   db: DB,
-  input: { projectId: number; status?: DiscoveryRunStatus }
+  input: {
+    projectId: number;
+    leadListId?: number | null;
+    status?: DiscoveryRunStatus;
+    plannerInputJson?: string | null;
+    plannerRawJson?: string | null;
+    payloadJson?: string | null;
+    compiledJobsJson?: string | null;
+    validationNotes?: string | null;
+  }
 ): DiscoveryRun {
   const result = db
     .prepare(
-      `INSERT INTO discovery_runs (project_id, status)
-       VALUES (?, ?)`
+      `INSERT INTO discovery_runs
+         (project_id, lead_list_id, status, planner_input_json, planner_raw_json,
+          payload_json, compiled_jobs_json, validation_notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .run(input.projectId, input.status ?? "queued");
+    .run(
+      input.projectId,
+      input.leadListId ?? null,
+      input.status ?? "queued",
+      input.plannerInputJson ?? null,
+      input.plannerRawJson ?? null,
+      input.payloadJson ?? null,
+      input.compiledJobsJson ?? null,
+      input.validationNotes ?? null
+    );
   return getDiscoveryRun(db, Number(result.lastInsertRowid))!;
 }
 
@@ -161,8 +193,20 @@ export function getDiscoveryRun(db: DB, id: number): DiscoveryRun | undefined {
 
 export function getLatestDiscoveryRunForProject(
   db: DB,
-  projectId: number
+  projectId: number,
+  leadListId?: number | null
 ): DiscoveryRun | undefined {
+  if (leadListId != null) {
+    const row = db
+      .prepare(
+        `SELECT * FROM discovery_runs
+         WHERE project_id = ? AND lead_list_id = ?
+         ORDER BY id DESC
+         LIMIT 1`
+      )
+      .get(projectId, leadListId) as DiscoveryRunRow | undefined;
+    return row ? toRun(row) : undefined;
+  }
   const row = db
     .prepare(
       `SELECT * FROM discovery_runs
@@ -174,6 +218,34 @@ export function getLatestDiscoveryRunForProject(
   return row ? toRun(row) : undefined;
 }
 
+export function listDiscoveryRunsForProject(
+  db: DB,
+  projectId: number,
+  options?: { leadListId?: number | null; limit?: number }
+): DiscoveryRun[] {
+  const limit = options?.limit ?? 10;
+  if (options?.leadListId != null) {
+    const rows = db
+      .prepare(
+        `SELECT * FROM discovery_runs
+         WHERE project_id = ? AND lead_list_id = ?
+         ORDER BY id DESC
+         LIMIT ?`
+      )
+      .all(projectId, options.leadListId, limit) as unknown as DiscoveryRunRow[];
+    return rows.map(toRun);
+  }
+  const rows = db
+    .prepare(
+      `SELECT * FROM discovery_runs
+       WHERE project_id = ?
+       ORDER BY id DESC
+       LIMIT ?`
+    )
+    .all(projectId, limit) as unknown as DiscoveryRunRow[];
+  return rows.map(toRun);
+}
+
 export interface UpdateDiscoveryRunInput {
   status?: DiscoveryRunStatus;
   fetchedCount?: number;
@@ -183,6 +255,11 @@ export interface UpdateDiscoveryRunInput {
   costEstimate?: number | null;
   error?: string | null;
   finishedAt?: string | null;
+  plannerInputJson?: string | null;
+  plannerRawJson?: string | null;
+  payloadJson?: string | null;
+  compiledJobsJson?: string | null;
+  validationNotes?: string | null;
 }
 
 export function updateDiscoveryRun(
@@ -201,7 +278,12 @@ export function updateDiscoveryRun(
        rejected_count = ?,
        cost_estimate = ?,
        error = ?,
-       finished_at = ?
+       finished_at = ?,
+       planner_input_json = ?,
+       planner_raw_json = ?,
+       payload_json = ?,
+       compiled_jobs_json = ?,
+       validation_notes = ?
      WHERE id = ?`
   ).run(
     input.status ?? existing.status,
@@ -214,6 +296,21 @@ export function updateDiscoveryRun(
       : existing.costEstimate,
     input.error !== undefined ? input.error : existing.error,
     input.finishedAt !== undefined ? input.finishedAt : existing.finishedAt,
+    input.plannerInputJson !== undefined
+      ? input.plannerInputJson
+      : existing.plannerInputJson,
+    input.plannerRawJson !== undefined
+      ? input.plannerRawJson
+      : existing.plannerRawJson,
+    input.payloadJson !== undefined
+      ? input.payloadJson
+      : existing.payloadJson,
+    input.compiledJobsJson !== undefined
+      ? input.compiledJobsJson
+      : existing.compiledJobsJson,
+    input.validationNotes !== undefined
+      ? input.validationNotes
+      : existing.validationNotes,
     id
   );
   return getDiscoveryRun(db, id);

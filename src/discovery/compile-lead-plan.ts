@@ -35,7 +35,7 @@ function placesForVolume(volume: number): number {
 
 /**
  * Compile a human lead plan into Apify-only discovery jobs.
- * No Product Hunt REST / Jina / Google CSE on this path.
+ * Prefer strategicPayloadToJobs for the Find leads path.
  */
 export function compileLeadPlanToApifyJobs(plan: LeadPlan): CompiledLeadFinding {
   const volume = clampVolumeTarget(plan.volumeTarget);
@@ -62,6 +62,7 @@ export function compileLeadPlanToApifyJobs(plan: LeadPlan): CompiledLeadFinding 
         resultsPerPage: 10,
         mobileResults: false,
         languageCode: "en",
+        csvFriendlyOutput: true,
       },
       mapping: {
         companyField: "title",
@@ -118,6 +119,7 @@ export function compileLeadPlanToApifyJobs(plan: LeadPlan): CompiledLeadFinding 
         maxPagesPerQuery: pages,
         resultsPerPage: 10,
         languageCode: "en",
+        csvFriendlyOutput: true,
       },
       mapping: {
         companyField: "title",
@@ -137,3 +139,5 @@ export function compileLeadPlanToApifyJobs(plan: LeadPlan): CompiledLeadFinding 
     concurrency: volume >= 500 ? 3 : 2,
   };
 }
+
+export { strategicPayloadToJobs } from "./validate-strategic-payload.js";

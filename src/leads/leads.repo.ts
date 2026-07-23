@@ -5,6 +5,7 @@ import type { DedupedLead } from "../validation/dedup.js";
 interface LeadRow {
   id: number;
   project_id: number;
+  lead_list_id?: number | null;
   company: string;
   website: string | null;
   canonical_domain: string | null;
@@ -21,6 +22,7 @@ function toLead(row: LeadRow): Lead {
   return {
     id: row.id,
     projectId: row.project_id,
+    leadListId: row.lead_list_id ?? null,
     company: row.company,
     website: row.website,
     canonicalDomain: row.canonical_domain,
@@ -35,25 +37,40 @@ function toLead(row: LeadRow): Lead {
   };
 }
 
-/** Inserts gated leads for a project. */
-export function insertLeads(db: DB, projectId: number, leads: DedupedLead[]): void {
+/** Inserts leads for a project (optionally scoped to a lead list). */
+export function insertLeads(
+  db: DB,
+  projectId: number,
+  leads: DedupedLead[],
+  leadListId?: number | null,
+  status: Lead["status"] = "gated"
+): void {
+  let listId = leadListId;
+  if (listId === undefined) {
+    const row = db
+      .prepare("SELECT active_lead_list_id FROM projects WHERE id = ?")
+      .get(projectId) as { active_lead_list_id: number | null } | undefined;
+    listId = row?.active_lead_list_id ?? null;
+  }
   const stmt = db.prepare(
     `INSERT INTO leads
-       (project_id, company, website, canonical_domain, email, votes, sources, status)
+       (project_id, lead_list_id, company, website, canonical_domain, email, votes, sources, status)
      VALUES
-       (?, ?, ?, ?, ?, ?, ?, 'gated')`
+       (?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
   db.exec("BEGIN");
   try {
     for (const lead of leads) {
       stmt.run(
         projectId,
+        listId ?? null,
         lead.company,
         lead.website,
         lead.canonicalDomain,
         lead.email,
         lead.votes,
-        JSON.stringify(lead.sources)
+        JSON.stringify(lead.sources),
+        status
       );
     }
     db.exec("COMMIT");
@@ -63,21 +80,69 @@ export function insertLeads(db: DB, projectId: number, leads: DedupedLead[]): vo
   }
 }
 
-export function listLeads(db: DB, projectId: number): Lead[] {
+export function setLeadStatus(
+  db: DB,
+  projectId: number,
+  leadId: number,
+  status: Lead["status"]
+): Lead | undefined {
+  const existing = getLead(db, projectId, leadId);
+  if (!existing) return undefined;
+  db.prepare(
+    `UPDATE leads SET status = ? WHERE project_id = ? AND id = ?`
+  ).run(status, projectId, leadId);
+  return getLead(db, projectId, leadId);
+}
+
+export function listLeads(
+  db: DB,
+  projectId: number,
+  leadListId?: number | null
+): Lead[] {
+  if (leadListId != null) {
+    const rows = db
+      .prepare(
+        `SELECT * FROM leads
+         WHERE project_id = ? AND lead_list_id = ?
+         ORDER BY id`
+      )
+      .all(projectId, leadListId) as unknown as LeadRow[];
+    return rows.map(toLead);
+  }
   const rows = db
     .prepare("SELECT * FROM leads WHERE project_id = ? ORDER BY id")
     .all(projectId) as unknown as LeadRow[];
   return rows.map(toLead);
 }
 
-export function listGatedLeads(db: DB, projectId: number): Lead[] {
+export function listGatedLeads(
+  db: DB,
+  projectId: number,
+  leadListId?: number | null
+): Lead[] {
+  if (leadListId != null) {
+    const rows = db
+      .prepare(
+        `SELECT * FROM leads
+         WHERE project_id = ? AND lead_list_id = ? AND status = 'gated'
+         ORDER BY id`
+      )
+      .all(projectId, leadListId) as unknown as LeadRow[];
+    return rows.map(toLead);
+  }
   const rows = db
-    .prepare("SELECT * FROM leads WHERE project_id = ? AND status = 'gated' ORDER BY id")
+    .prepare(
+      "SELECT * FROM leads WHERE project_id = ? AND status = 'gated' ORDER BY id"
+    )
     .all(projectId) as unknown as LeadRow[];
   return rows.map(toLead);
 }
 
-export function getLead(db: DB, projectId: number, leadId: number): Lead | undefined {
+export function getLead(
+  db: DB,
+  projectId: number,
+  leadId: number
+): Lead | undefined {
   const row = db
     .prepare("SELECT * FROM leads WHERE project_id = ? AND id = ?")
     .get(projectId, leadId) as unknown as LeadRow | undefined;
@@ -96,8 +161,8 @@ export function saveScore(
     throw new Error("score must be 0–100");
   }
   const existing = getLead(db, projectId, leadId);
-  if (!existing) throw new Error(`lead ${leadId} not found in project ${projectId}`);
-  // draft reserved — ignore for now (column not in schema yet)
+  if (!existing)
+    throw new Error(`lead ${leadId} not found in project ${projectId}`);
   void draft;
   db.prepare(
     `UPDATE leads SET score = ?, reasons = ?, status = 'scored' WHERE project_id = ? AND id = ?`
@@ -128,6 +193,7 @@ export interface LeadFilter {
   minScore?: number;
   source?: string;
   q?: string;
+  leadListId?: number | null;
 }
 
 export function listLeadsFiltered(
@@ -138,6 +204,10 @@ export function listLeadsFiltered(
   const clauses = ["project_id = ?"];
   const params: (string | number)[] = [projectId];
 
+  if (filter.leadListId != null) {
+    clauses.push("lead_list_id = ?");
+    params.push(filter.leadListId);
+  }
   if (filter.status) {
     clauses.push("status = ?");
     params.push(filter.status);
@@ -151,7 +221,6 @@ export function listLeadsFiltered(
     params.push(`%${filter.q}%`);
   }
   if (filter.source) {
-    // sources is a JSON array string; match containment
     clauses.push("sources LIKE ?");
     params.push(`%"${filter.source}"%`);
   }

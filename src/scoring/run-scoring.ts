@@ -1,6 +1,7 @@
 import type { DB } from "../db/database.js";
 import { getProject } from "../projects/projects.repo.js";
 import { listGatedLeads, saveScore } from "../leads/leads.repo.js";
+import { getActiveLeadListId } from "../leads/lead-lists.repo.js";
 import type { FeedbackRag } from "../rag/feedback-rag.js";
 import { FileFeedbackRag } from "../rag/file-feedback-rag.js";
 import type { Scorer } from "./scorer.js";
@@ -15,6 +16,8 @@ export interface ScoringSummary {
 export interface RunScoringOptions {
   rag?: FeedbackRag | null;
   similarK?: number;
+  leadListId?: number;
+  onProgress?: (message: string, level?: "info" | "warning" | "error") => void;
 }
 
 function resolveRag(options?: RunScoringOptions): FeedbackRag | null {
@@ -33,13 +36,21 @@ export async function runScoring(
 ): Promise<ScoringSummary> {
   const project = getProject(db, projectId);
   if (!project) throw new Error(`project ${projectId} not found`);
-  const gated = listGatedLeads(db, projectId);
+  const leadListId =
+    options?.leadListId ?? getActiveLeadListId(db, projectId);
+  const gated = listGatedLeads(db, projectId, leadListId);
   const rag = resolveRag(options);
   const k = options?.similarK ?? 3;
+  
+  options?.onProgress?.(`Starting scoring for ${gated.length} leads.`);
+  
   let scored = 0,
     errors = 0;
   const errorMessages: string[] = [];
+  let index = 0;
   for (const lead of gated) {
+    index++;
+    options?.onProgress?.(`Scoring lead ${index}/${gated.length}: ${lead.company}`);
     try {
       const query = [lead.company, lead.website ?? "", project.icp ?? ""]
         .filter((p) => p.length > 0)
@@ -54,5 +65,13 @@ export async function runScoring(
       errorMessages.push(`lead ${lead.id} (${lead.company}): ${msg}`);
     }
   }
-  return { scored, skipped: 0, errors, errorMessages };
+  
+  options?.onProgress?.(`Scoring complete. Scored: ${scored}, Errors: ${errors}`);
+  
+  return {
+    scored,
+    skipped: 0,
+    errors,
+    errorMessages,
+  };
 }

@@ -21,6 +21,8 @@ export interface RunIngestOptions {
   enrichWebsites?: boolean;
   /** Injectable fetch used by the website enricher. */
   fetch?: FetchLike;
+  /** Scope insert + dedupe to this lead list. */
+  leadListId?: number | null;
 }
 
 function resolveOptions(
@@ -36,9 +38,10 @@ function resolveOptions(
 function filterNewLeads(
   db: DB,
   projectId: number,
-  kept: DedupedLead[]
+  kept: DedupedLead[],
+  leadListId?: number | null
 ): { novel: DedupedLead[]; skippedExisting: number } {
-  const existing = listLeads(db, projectId);
+  const existing = listLeads(db, projectId, leadListId);
   const keys = new Set(
     existing.map((l) =>
       leadIdentityKey({
@@ -78,8 +81,13 @@ export async function runIngest(
   }
 
   const { kept, rejected } = await validateAggregate(merged, options.resolver);
-  const { novel, skippedExisting } = filterNewLeads(db, projectId, kept);
-  insertLeads(db, projectId, novel);
+  const { novel, skippedExisting } = filterNewLeads(
+    db,
+    projectId,
+    kept,
+    options.leadListId
+  );
+  insertLeads(db, projectId, novel, options.leadListId);
 
   return {
     fetched: merged.length,

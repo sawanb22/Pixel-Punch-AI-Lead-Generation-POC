@@ -1,0 +1,73 @@
+{
+  "results": {
+    "B1": {
+      "result": "pass",
+      "evidence": "project id=12 icp set"
+    },
+    "B2": {
+      "result": "pass",
+      "evidence": "fetched=2 kept=1 rejected=1"
+    },
+    "B3": {
+      "result": "pass",
+      "evidence": "GoodCo count stable at 1"
+    },
+    "C2": {
+      "result": "pass",
+      "evidence": "scored=1 errors=0 sampleScore=30"
+    },
+    "C4": {
+      "result": "pass",
+      "evidence": "runScoring(HermesScorer) wrote scores via LeadRadar repos (Pattern B)"
+    },
+    "E1": {
+      "result": "pass",
+      "evidence": "feedback total=1 good=1"
+    },
+    "E2": {
+      "result": "pass",
+      "evidence": "rag files=lead_448.md"
+    },
+    "E3": {
+      "result": "fail",
+      "evidence": "twin status=gated summary={\"scored\":0,\"skipped\":0,\"errors\":1,\"errorMessages\":[\"lead 449 (GoodCo Twin AI): Hermes response is not valid JSON: User Safety: safe\"]}"
+    },
+    "E4": {
+      "result": "gap",
+      "evidence": "FileFeedbackRag in use; Hermes knowledge_base/Chroma not primary (design §8)"
+    },
+    "H1": {
+      "result": "pass",
+      "evidence": "no shared lead ids between 12 and 6"
+    },
+    "H2": {
+      "result": "pass",
+      "evidence": "project 12 stats total=1; other 6 total=0"
+    },
+    "G_config": {
+      "result": "fail",
+      "evidence": "source_config=undefined"
+    },
+    "G1": {
+      "result": "fail",
+      "evidence": "no producthunt-sourced leads on project 3"
+    },
+    "G2": {
+      "result": "fail",
+      "evidence": "no jina-sourced leads on project 3"
+    },
+    "G4": {
+      "result": "pass",
+      "evidence": "no obvious listicle/reddit noise"
+    },
+    "G5": {
+      "result": "gap",
+      "evidence": "Google CSE skipped intentionally; Jina is web-search stand-in"
+    },
+    "G3": {
+      "result": "fail",
+      "evidence": "enrich not enabled on project 3"
+    }
+  },
+  "e2eProjectId": 12
+}

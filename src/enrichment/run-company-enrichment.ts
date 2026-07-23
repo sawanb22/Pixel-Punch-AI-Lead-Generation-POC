@@ -48,7 +48,9 @@ export interface RunCompanyEnrichmentOptions {
   force?: boolean;
   concurrency?: number;
   now?: () => string;
+  onProgress?: (message: string, level?: "info" | "warning" | "error") => void;
 }
+
 
 async function mapPool<T, R>(
   items: T[],
@@ -156,6 +158,7 @@ export async function runCompanyEnrichment(
   }
 
   updateEnrichmentRun(db, run.id, { companiesQueued: eligible.length });
+  options.onProgress?.(`Found ${eligible.length} eligible companies to enrich.`);
 
   const errors: string[] = [];
   let companiesEnriched = 0;
@@ -163,10 +166,14 @@ export async function runCompanyEnrichment(
   let evidenceSaved = 0;
   let emailsFound = 0;
   let failed = 0;
+  let processedCount = 0;
 
   await mapPool(eligible, concurrency, async (lead) => {
     const domain =
       lead.canonicalDomain ?? domainFromWebsite(lead.website) ?? "unknown";
+    processedCount++;
+    options.onProgress?.(`Enriching company ${processedCount}/${eligible.length}: ${domain}`);
+
     const homepage = normalizeHomepageUrl(lead.website);
     const job = createEnrichmentJob(db, {
       runId: run.id,
@@ -222,6 +229,7 @@ export async function runCompanyEnrichment(
         fetch: fetchImpl,
         db,
         timeoutMs: config.timeoutSeconds * 1000,
+        useJinaReader: config.useJinaReader,
       });
 
       if (!homepageFetch.body) {
@@ -299,6 +307,7 @@ export async function runCompanyEnrichment(
           fetch: fetchImpl,
           db,
           timeoutMs: config.timeoutSeconds * 1000,
+          useJinaReader: config.useJinaReader,
         });
         companyPagesFetched += 1;
         pagesFetched += 1;
@@ -426,6 +435,9 @@ export async function runCompanyEnrichment(
     error: errors.length ? errors.join("; ") : null,
     finishedAt: now(),
   });
+
+  options.onProgress?.(`Enrichment complete. Enriched: ${companiesEnriched}, Emails found: ${emailsFound}, Failed: ${failed}`);
+
 
   return {
     runId: run.id,

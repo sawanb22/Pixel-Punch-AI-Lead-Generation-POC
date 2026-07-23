@@ -20,6 +20,8 @@ export interface LeadFindingSourceConfig {
   timeoutSeconds?: number;
   /** Optional pack query template key for docs/debugging. */
   discoveryQuery?: string;
+  /** Strategic payload actor key (google_maps, wellfound_startups, …). */
+  actorKey?: string;
 }
 
 export interface LeadFindingConfig {

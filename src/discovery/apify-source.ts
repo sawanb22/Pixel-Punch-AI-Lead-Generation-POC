@@ -1,9 +1,10 @@
 import type { ApifyClient } from "./apify-client.js";
 import {
+  expandApifyDatasetItems,
   mapApifyItemToCandidate,
   type ApifyResultMapping,
 } from "./map-candidate.js";
-import { evaluateCandidateNoise } from "./noise-filter.js";
+import { evaluateHardShield } from "./hard-shield.js";
 import type { DiscoveredCompanyCandidate } from "./types.js";
 
 export interface ApifyActorSourceOptions {
@@ -16,6 +17,8 @@ export interface ApifyActorSourceOptions {
   discoveryQuery?: string | null;
   allowCompanyOnly?: boolean;
   timeoutMs?: number;
+  actorKey?: string;
+  negatives?: string[];
 }
 
 export interface ApifyActorSourceResult {
@@ -47,10 +50,11 @@ export class ApifyActorSource {
       timeoutMs: this.options.timeoutMs,
     });
 
+    const items = expandApifyDatasetItems(run.items);
     const candidates: DiscoveredCompanyCandidate[] = [];
     const rejected: DiscoveredCompanyCandidate[] = [];
 
-    for (const item of run.items) {
+    for (const item of items) {
       const mapped = mapApifyItemToCandidate(item, {
         sourceId: this.options.sourceId,
         sourceType: "apify",
@@ -74,11 +78,16 @@ export class ApifyActorSource {
         continue;
       }
 
-      const noise = evaluateCandidateNoise(mapped);
-      if (noise.reject) {
+      const shield = evaluateHardShield(mapped, {
+        allowWellfoundHosts:
+          this.options.actorKey === "wellfound_startups",
+        negatives: this.options.negatives,
+        allowCompanyOnly: this.options.allowCompanyOnly,
+      });
+      if (shield.reject) {
         rejected.push({
           ...mapped,
-          rejectionReason: noise.reason ?? "noise",
+          rejectionReason: shield.reason ?? "hard_shield",
         });
         continue;
       }
@@ -91,7 +100,7 @@ export class ApifyActorSource {
       costEstimate: run.usageTotalUsd ?? null,
       candidates,
       rejected,
-      fetched: run.items.length,
+      fetched: items.length,
     };
   }
 }

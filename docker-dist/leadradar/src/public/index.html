@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LeadRadar</title>
+  <script>
+    (function () {
+      try {
+        var stored = localStorage.getItem("leadradar-theme");
+        var theme =
+          stored === "light" || stored === "dark"
+            ? stored
+            : window.matchMedia("(prefers-color-scheme: dark)").matches
+              ? "dark"
+              : "light";
+        document.documentElement.setAttribute("data-theme", theme);
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "light");
+      }
+    })();
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Sora:wght@600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="brand-block">
+      <div class="brand">LeadRadar</div>
+      <div id="brand-project" class="brand-sub">Select a project</div>
+    </div>
+    <div class="header-actions">
+      <button
+        id="btn-theme"
+        type="button"
+        class="theme-toggle ghost"
+        aria-label="Toggle color theme"
+        title="Toggle theme"
+      >
+        <span class="icon-moon" aria-hidden="true">☾</span>
+        <span class="icon-sun" aria-hidden="true">☀</span>
+      </button>
+      <div id="user-info" class="user-chip">—</div>
+    </div>
+  </header>
+
+  <section id="bypass-banner" class="banner hidden">
+    Auth bypass active (<code>LEADRADAR_AUTH_BYPASS=1</code>)
+  </section>
+
+  <section class="project-bar">
+    <label>
+      Project
+      <select id="project-select"></select>
+    </label>
+    <button id="btn-new-project" type="button" class="ghost">New project</button>
+  </section>
+
+  <div class="workspace">
+    <aside class="list-sidebar" id="list-sidebar" aria-label="Lead lists">
+      <div class="list-sidebar-head">
+        <h2 class="list-sidebar-title">Lead lists</h2>
+        <button id="btn-new-list" type="button" class="ghost tiny" disabled>+ New</button>
+      </div>
+      <div id="list-sidebar-cards" class="list-sidebar-cards"></div>
+      <div class="list-sidebar-foot">
+        <button id="btn-list-settings" type="button" class="ghost tiny" disabled>Settings</button>
+        <button id="btn-clear-list" type="button" class="ghost tiny" disabled>Clear</button>
+        <button id="btn-delete-list" type="button" class="ghost tiny" disabled>Delete</button>
+      </div>
+      <select id="lead-list-select" class="visually-hidden" disabled aria-hidden="true" tabindex="-1"></select>
+    </aside>
+
+    <div class="workspace-main">
+  <section id="kpis" class="kpis">
+    <div class="kpi">
+      <span class="kpi-label">Total leads</span>
+      <span id="kpi-total" class="kpi-value">—</span>
+    </div>
+    <div class="kpi">
+      <span class="kpi-label">New this week</span>
+      <span id="kpi-new" class="kpi-value">—</span>
+    </div>
+    <div id="kpi-approval-wrap" class="kpi">
+      <span class="kpi-label">Approval rate</span>
+      <span id="kpi-approval" class="kpi-value">—</span>
+    </div>
+    <div id="kpi-reply-wrap" class="kpi tint-muted">
+      <span class="kpi-label">Reply rate</span>
+      <span id="kpi-reply" class="kpi-value">—</span>
+    </div>
+  </section>
+
+  <section class="ops">
+    <button id="btn-find-leads" type="button" class="primary" disabled title="Select a list with a ready plan">Find leads</button>
+    <label class="check-inline" title="Ignore locked plan and regenerate with Hermes">
+      <input id="force-replan" type="checkbox" />
+      Force replan
+    </label>
+    <button id="btn-enrich-companies" type="button">Enrich companies</button>
+    <button id="btn-find-contacts" type="button">Find contacts</button>
+    <button id="btn-score" type="button">Run scoring</button>
+    <button id="btn-export-emails" type="button">Export Emails</button>
+    <button id="btn-export-all" type="button">Export All</button>
+    <label class="file-btn">
+      Import CSV
+      <input id="import-file" type="file" accept=".csv,text/csv" />
+    </label>
+    <button id="btn-project-settings" type="button" class="ghost">Project settings</button>
+    <span class="ops-spacer"></span>
+    <button id="btn-shortcuts" type="button" class="shortcut-hint-btn ghost" title="Keyboard shortcuts">?</button>
+  </section>
+
+  <section class="plan-activity">
+    <article id="lead-plan-card" class="panel-card">
+      <div class="panel-card-head plan-card-head">
+        <div class="plan-card-head-text">
+          <h2>Lead plan for: <span id="lead-plan-list-name">—</span></h2>
+          <p id="lead-plan-hint" class="muted plan-hint">Find leads will use this exact plan.</p>
+        </div>
+        <span id="lead-plan-state" class="plan-state-chip muted">—</span>
+      </div>
+      <p id="lead-plan-stale-banner" class="plan-stale-banner hidden" role="status"></p>
+      <p id="lead-plan-last-generated" class="muted plan-last-generated"></p>
+      <p id="lead-plan-goal" class="plan-goal">Create or open a project to draft a plan.</p>
+      <p id="lead-plan-focus" class="muted plan-focus"></p>
+      <p id="lead-plan-empty" class="plan-empty hidden"></p>
+      <dl id="lead-plan-meta" class="plan-meta muted"></dl>
+      <p id="lead-plan-sources" class="muted plan-sources"></p>
+      <ul id="lead-plan-angles" class="plan-angles"></ul>
+      <h3 class="plan-section-label">Apify jobs</h3>
+      <div id="lead-plan-jobs" class="plan-jobs"></div>
+      <div class="plan-actions">
+        <button id="btn-regen-plan" type="button" class="ghost" disabled>Regenerate plan</button>
+        <button id="btn-refresh-website" type="button" class="ghost" disabled>Refresh from website</button>
+      </div>
+      <label class="plan-feedback">
+        Feedback for this list's plan
+        <textarea id="lead-plan-feedback" rows="2" placeholder="e.g. more local restaurants, focus on funded startups for this list…" disabled></textarea>
+      </label>
+      <button id="btn-plan-feedback" type="button" class="ghost" disabled>Apply feedback</button>
+    </article>
+    <article id="ops-console-card" class="panel-card">
+      <div class="panel-card-head">
+        <h2>Operations</h2>
+        <div class="ops-console-actions">
+          <select id="ops-type-filter" class="ops-type-filter" disabled>
+            <option value="all">All steps</option>
+            <option value="discovery">Discovery</option>
+            <option value="enrichment">Enrichment</option>
+            <option value="contacts">Contacts</option>
+            <option value="scoring">Scoring</option>
+          </select>
+          <select id="ops-run-select" disabled></select>
+          <button id="btn-refresh-activity" type="button" class="ghost tiny" disabled>Refresh</button>
+        </div>
+      </div>
+      <p id="activity-summary" class="muted">No discovery runs yet.</p>
+      <ol id="activity-timeline" class="activity-timeline"></ol>
+      <div id="ops-fields" class="ops-fields"></div>
+      <div id="activity-rejected" class="activity-rejected hidden"></div>
+      <div id="activity-kept" class="activity-kept hidden"></div>
+    </article>
+  </section>
+
+  <section class="filters">
+    <label>
+      Status
+      <select id="filter-status">
+        <option value="">All</option>
+        <option value="gated">gated</option>
+        <option value="provisional">provisional</option>
+        <option value="scored">scored</option>
+        <option value="approved">approved</option>
+        <option value="rejected">rejected</option>
+      </select>
+    </label>
+    <label>
+      Min score
+      <input id="filter-min-score" type="number" min="0" max="100" placeholder="0" />
+    </label>
+    <label>
+      Search
+      <input id="filter-q" type="search" placeholder="Company…" />
+    </label>
+    <button id="btn-filter" type="button">Apply</button>
+    <span id="result-count" class="result-count">0 leads</span>
+  </section>
+
+  <main class="main">
+    <div class="table-wrap">
+      <table id="leads-table">
+        <thead>
+          <tr>
+            <th>Company</th>
+            <th>Email</th>
+            <th>Score</th>
+            <th>Status</th>
+            <th>Enriched</th>
+            <th>Contacts</th>
+            <th>Sources</th>
+          </tr>
+        </thead>
+        <tbody id="leads-body"></tbody>
+      </table>
+      <div id="table-empty" class="table-empty hidden">No leads match these filters.</div>
+    </div>
+    <aside id="detail" class="detail">
+      <p class="detail-eyebrow">Lead detail</p>
+      <p class="detail-empty" id="detail-empty">Select a lead to review</p>
+      <div id="detail-body" class="hidden">
+        <h3 id="detail-company"></h3>
+        <div id="detail-meta" class="detail-meta"></div>
+        <pre id="detail-reasons"></pre>
+        <div id="detail-profile-section" class="detail-contacts hidden">
+          <p class="detail-contacts-label">🏢 Company Profile & Enrichment</p>
+          <div id="detail-profile-content" style="font-size: 0.85rem; line-height: 1.4; opacity: 0.9;"></div>
+        </div>
+        <div id="detail-contacts-section" class="detail-contacts hidden">
+          <p class="detail-contacts-label">👤 Contacts</p>
+          <ul id="detail-contacts-list" class="detail-contacts-list"></ul>
+        </div>
+        <div class="detail-actions">
+
+          <button id="btn-approve" type="button" class="ok">Approve</button>
+          <button id="btn-reject" type="button" class="bad">Reject</button>
+          <button id="btn-promote" type="button" class="ghost hidden">Promote</button>
+          <button id="btn-discard" type="button" class="ghost danger hidden">Discard</button>
+        </div>
+        <label>
+          Notes
+          <input id="detail-notes" type="text" placeholder="Optional notes" />
+        </label>
+      </div>
+    </aside>
+  </main>
+    </div>
+  </div>
+
+  <div id="new-project-backdrop" class="dialog-backdrop" role="presentation" inert>
+    <div class="dialog dialog-wide" role="dialog" aria-labelledby="new-project-title" aria-modal="true">
+      <h2 id="new-project-title">New project</h2>
+      <p class="dialog-desc">Describe who you help. We’ll draft an Apify lead plan automatically.</p>
+      <form id="new-project-form">
+        <div class="dialog-fields">
+          <label>
+            Name
+            <input name="name" placeholder="e.g. Pixel Punch" required autocomplete="off" />
+          </label>
+          <label>
+            Website
+            <input name="website" placeholder="https://…" autocomplete="off" />
+          </label>
+          <label>
+            Description
+            <input name="description" placeholder="Short agency description" autocomplete="off" />
+          </label>
+          <label>
+            What we sell / who we help
+            <textarea name="icp" rows="4" placeholder="e.g. We build AI agents and websites for local SMBs…"></textarea>
+          </label>
+          <label>
+            Geography (optional)
+            <input name="geography" placeholder="e.g. Austin, TX or DACH" autocomplete="off" />
+          </label>
+          <label>
+            Target volume
+            <select name="volumeTarget">
+              <option value="25">25</option>
+              <option value="50">50</option>
+              <option value="100" selected>100</option>
+              <option value="250">250</option>
+              <option value="500">500</option>
+              <option value="1000">1000</option>
+              <option value="2000">2000</option>
+            </select>
+          </label>
+        </div>
+        <div class="dialog-actions">
+          <button id="btn-cancel-project" type="button" class="ghost">Cancel</button>
+          <button type="submit" class="primary">Create project</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="settings-backdrop" class="dialog-backdrop" role="presentation" inert>
+    <div class="dialog dialog-wide" role="dialog" aria-labelledby="settings-title" aria-modal="true">
+      <h2 id="settings-title">Project settings</h2>
+      <p class="dialog-desc">Agency identity and default hunt settings for the Project list.</p>
+      <form id="settings-form">
+        <div class="dialog-fields">
+          <label>
+            Name
+            <input name="name" required autocomplete="off" />
+          </label>
+          <label>
+            Website
+            <input name="website" placeholder="https://…" autocomplete="off" />
+          </label>
+          <label>
+            Description
+            <input name="description" autocomplete="off" />
+          </label>
+          <label>
+            What we sell / who we help
+            <textarea name="icp" rows="4" placeholder="Ideal customer profile in plain English…"></textarea>
+          </label>
+          <label>
+            Geography (optional)
+            <input name="geography" placeholder="e.g. Austin, TX or DACH" autocomplete="off" />
+          </label>
+          <label>
+            Target volume
+            <select name="volumeTarget">
+              <option value="25">25</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+              <option value="250">250</option>
+              <option value="500">500</option>
+              <option value="1000">1000</option>
+              <option value="2000">2000</option>
+            </select>
+          </label>
+          <fieldset class="enabled-sources">
+            <legend>Enabled lead sources</legend>
+            <div id="settings-enabled-sources" class="checkbox-grid"></div>
+          </fieldset>
+        </div>
+        <div class="dialog-actions">
+          <button id="btn-delete-project" type="button" class="ghost danger" disabled>Delete project</button>
+          <div class="dialog-actions-end">
+            <button id="btn-cancel-settings" type="button" class="ghost">Cancel</button>
+            <button type="submit" class="primary">Save</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="new-list-backdrop" class="dialog-backdrop" role="presentation" inert>
+    <div class="dialog" role="dialog" aria-labelledby="new-list-title" aria-modal="true">
+      <h2 id="new-list-title">New lead list</h2>
+      <p class="dialog-desc">Define hunt focus — we'll generate this list's first plan immediately.</p>
+      <form id="new-list-form">
+        <div class="dialog-fields">
+          <label>
+            Name
+            <input name="name" placeholder="e.g. NFT startups 200" required autocomplete="off" />
+          </label>
+          <label>
+            Description (hunt focus)
+            <input name="description" placeholder="What type of leads? e.g. startups needing mobile app builds" autocomplete="off" />
+          </label>
+          <label>
+            Geography (optional)
+            <input name="geography" placeholder="e.g. Austin, TX or DACH" autocomplete="off" />
+          </label>
+          <label>
+            Target volume
+            <select name="volumeTarget">
+              <option value="25">25</option>
+              <option value="50">50</option>
+              <option value="100" selected>100</option>
+              <option value="250">250</option>
+              <option value="500">500</option>
+              <option value="1000">1000</option>
+              <option value="2000">2000</option>
+            </select>
+          </label>
+          <fieldset class="enabled-sources">
+            <legend>Enabled lead sources</legend>
+            <div id="new-list-enabled-sources" class="checkbox-grid"></div>
+          </fieldset>
+        </div>
+        <div class="dialog-actions">
+          <button id="btn-cancel-list" type="button" class="ghost">Cancel</button>
+          <button type="submit" class="primary">Create list &amp; plan</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="list-settings-backdrop" class="dialog-backdrop" role="presentation" inert>
+    <div class="dialog dialog-wide" role="dialog" aria-labelledby="list-settings-title" aria-modal="true">
+      <h2 id="list-settings-title">List settings</h2>
+      <p class="dialog-desc">Hunt config for this list. On Project list, empty fields use project defaults. Other lists use these settings only.</p>
+      <form id="list-settings-form">
+        <div class="dialog-fields">
+          <label>
+            Name
+            <input name="name" required autocomplete="off" />
+          </label>
+          <label>
+            Description (hunt focus)
+            <input name="description" placeholder="What type of leads? e.g. startups needing mobile app builds" autocomplete="off" />
+          </label>
+          <label>
+            Geography (optional)
+            <input name="geography" placeholder="e.g. Austin, TX or DACH" autocomplete="off" />
+          </label>
+          <label>
+            Target volume
+            <select name="volumeTarget">
+              <option value="25">25</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+              <option value="250">250</option>
+              <option value="500">500</option>
+              <option value="1000">1000</option>
+              <option value="2000">2000</option>
+            </select>
+          </label>
+          <fieldset class="enabled-sources">
+            <legend>Enabled lead sources</legend>
+            <div id="list-settings-enabled-sources" class="checkbox-grid"></div>
+          </fieldset>
+        </div>
+        <div class="dialog-actions">
+          <button id="btn-cancel-list-settings" type="button" class="ghost">Cancel</button>
+          <button type="submit" name="saveAction" value="save" class="ghost">Save</button>
+          <button type="submit" name="saveAction" value="regenerate" class="primary">Save &amp; regenerate plan</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="shortcut-panel" class="shortcut-panel hidden">
+    <h3>Shortcuts</h3>
+    <dl>
+      <dt>j / ↓</dt><dd>Next lead</dd>
+      <dt>k / ↑</dt><dd>Previous lead</dd>
+      <dt>a</dt><dd>Approve</dd>
+      <dt>r</dt><dd>Reject</dd>
+      <dt>?</dt><dd>Toggle this help</dd>
+    </dl>
+  </div>
+
+  <div id="toast-host" class="toast-host" aria-live="polite"></div>
+
+  <script src="/app.js" type="module"></script>
+</body>
+</html>

@@ -14,6 +14,10 @@ function project(sourceConfig: string | null): Project {
     icp: null,
     sourceConfig,
     leadPlan: null,
+    leadStrategy: null,
+    websiteSummary: null,
+    websiteSummaryAt: null,
+    activeLeadListId: null,
     status: "active",
     createdAt: "2026-01-01",
   };

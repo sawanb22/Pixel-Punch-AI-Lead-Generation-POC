@@ -66,6 +66,10 @@ describe("lead-finding-config", () => {
           },
         }),
         leadPlan: null,
+        leadStrategy: null,
+        websiteSummary: null,
+        websiteSummaryAt: null,
+        activeLeadListId: null,
         status: "active",
         createdAt: "",
       },
@@ -114,6 +118,17 @@ describe("ApifyActorSource", () => {
             website: "https://linkedin.com/company/noise",
             url: "https://maps.example/2",
           },
+          {
+            searchQuery: { term: "cafes" },
+            organicResults: [
+              {
+                title: "Real Cafe",
+                url: "https://realcafe.example",
+                displayedUrl: "realcafe.example",
+                type: "organic",
+              },
+            ],
+          },
         ],
         usageTotalUsd: 0.12,
       }),
@@ -134,8 +149,12 @@ describe("ApifyActorSource", () => {
 
     const result = await source.fetchCandidates();
     expect(result.apifyRunId).toBe("r1");
-    expect(result.candidates).toHaveLength(1);
-    expect(result.candidates[0].company).toBe("Acme Cafe");
+    expect(result.fetched).toBe(4);
+    expect(result.candidates.length).toBeGreaterThanOrEqual(2);
+    expect(result.candidates.some((c) => c.company === "Acme Cafe")).toBe(true);
+    expect(result.candidates.some((c) => c.domain === "realcafe.example")).toBe(
+      true
+    );
     expect(result.rejected.length).toBeGreaterThanOrEqual(1);
     expect(
       result.rejected.some((r) => /blocked|job/i.test(r.rejectionReason ?? ""))
@@ -218,6 +237,7 @@ describe("runLeadFinding", () => {
     const summary = await runLeadFinding(db, project.id, {
       apifyClient: client,
       concurrency: 2,
+      skipBuyerGate: true,
     });
 
     expect(summary.status).toBe("completed");
@@ -284,6 +304,7 @@ describe("runLeadFinding", () => {
 
     const summary = await runLeadFinding(db, project.id, {
       apifyClient: client,
+      skipBuyerGate: true,
     });
     expect(summary.kept).toBe(1);
     expect(listLeads(db, project.id)).toHaveLength(1);
