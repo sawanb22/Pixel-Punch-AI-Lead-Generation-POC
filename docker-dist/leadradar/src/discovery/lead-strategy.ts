@@ -1,7 +1,7 @@
 import { z } from "zod";
 import {
   ACTOR_CATALOG,
-  DEFAULT_AGENCY_ACTOR_KEYS,
+  ALL_ACTOR_KEYS,
   type ActorKey,
 } from "./actor-catalog.js";
 
@@ -9,7 +9,8 @@ export const LeadStrategySchema = z.object({
   version: z.literal(1).default(1),
   enabledActorKeys: z
     .array(z.string())
-    .min(1)
+    .optional()
+    .default([])
     .transform((keys) =>
       keys.filter((k): k is ActorKey => k in ACTOR_CATALOG)
     ),
@@ -26,7 +27,7 @@ export function defaultLeadStrategy(
     version: 1,
     enabledActorKeys: overrides?.enabledActorKeys?.length
       ? overrides.enabledActorKeys
-      : [...DEFAULT_AGENCY_ACTOR_KEYS],
+      : [...ALL_ACTOR_KEYS],
     defaultGeography: overrides?.defaultGeography ?? "USA",
     buyerMode: overrides?.buyerMode ?? "agency",
   });
@@ -44,6 +45,7 @@ export function parseLeadStrategy(
       return defaultLeadStrategy({
         defaultGeography: result.data.defaultGeography ?? null,
         buyerMode: result.data.buyerMode,
+        enabledActorKeys: [...ALL_ACTOR_KEYS],
       });
     }
     return result.data;

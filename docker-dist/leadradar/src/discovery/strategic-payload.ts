@@ -3,6 +3,7 @@ import {
   ACTOR_CATALOG,
   DEFAULT_AGENCY_ACTOR_KEYS,
   type ActorKey,
+  findActorEntry,
   isActorKey,
 } from "./actor-catalog.js";
 import type { LeadStrategy } from "./lead-strategy.js";
@@ -47,7 +48,7 @@ export interface StrategicPlannerContext {
   volumeTarget?: number;
   feedbackNotes?: string | null;
   websiteSummary?: string | null;
-  enabledActorKeys: ActorKey[];
+  enabledActorKeys?: ActorKey[];
   buyerMode?: LeadStrategy["buyerMode"];
   listName?: string | null;
   listDescription?: string | null;
@@ -105,7 +106,7 @@ export function defaultStrategicPayload(
   const goal = focusLabel
     ? `Find buyer companies for list "${focusLabel}" (${niche}) in ${geo}.`
     : `Find buyer companies for ${ctx.name} (${niche}) in ${geo}.`;
-  const enabled = ctx.enabledActorKeys.filter(isActorKey);
+  const enabled = (ctx.enabledActorKeys || []).filter(isActorKey);
   const keys =
     enabled.length > 0 ? enabled : [...DEFAULT_AGENCY_ACTOR_KEYS];
 
@@ -222,7 +223,7 @@ export function mappingForJob(
   job: StrategicPayloadJob
 ): ApifyResultMapping {
   if (job.mapping) return job.mapping;
-  const entry = ACTOR_CATALOG[job.actorKey as ActorKey];
+  const entry = findActorEntry(job.actorKey) || findActorEntry(job.actorId || "");
   return entry?.defaultMapping ?? {
     companyField: "title",
     websiteField: "url",

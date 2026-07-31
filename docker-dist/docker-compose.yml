@@ -11,6 +11,7 @@ services:
     env_file:
       - .env
     environment:
+      - LEADRADAR_DB=/app/data/leadradar.db
       - APIFY_TOKEN=${APIFY_TOKEN:-}
       - PRODUCTHUNT_TOKEN=${PRODUCTHUNT_TOKEN:-}
       - JINA_API_KEY=${JINA_API_KEY:-}
@@ -25,7 +26,26 @@ services:
       - leadradar_data:/app/data
       # Persists Hermes agent config, sessions, and memory across rebuilds
       - hermes_home:/hermes_home
+    depends_on:
+      - bifrost
+
+  bifrost:
+    image: maximhq/bifrost:v1.6.2
+    container_name: bifrost
+    restart: unless-stopped
+    ports:
+      - "8888:8080"
+    environment:
+      - APP_PORT=8080
+      - APP_HOST=0.0.0.0
+      - APP_DIR=/app/data
+      - LOG_LEVEL=info
+    volumes:
+      # Persists all LLM provider credentials and Bifrost database across container restarts and rebuilds
+      - bifrost_data:/app/data
 
 volumes:
   leadradar_data:
   hermes_home:
+  bifrost_data:
+

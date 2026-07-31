@@ -94,6 +94,15 @@ export function setLeadStatus(
   return getLead(db, projectId, leadId);
 }
 
+export function setLeadPipelineStatus(
+  db: DB,
+  projectId: number,
+  leadId: number,
+  status: Lead["status"]
+): Lead | undefined {
+  return setLeadStatus(db, projectId, leadId, status);
+}
+
 export function listLeads(
   db: DB,
   projectId: number,
@@ -124,7 +133,7 @@ export function listGatedLeads(
     const rows = db
       .prepare(
         `SELECT * FROM leads
-         WHERE project_id = ? AND lead_list_id = ? AND status = 'gated'
+         WHERE project_id = ? AND lead_list_id = ? AND status NOT IN ('approved', 'rejected', 'scored')
          ORDER BY id`
       )
       .all(projectId, leadListId) as unknown as LeadRow[];
@@ -132,7 +141,7 @@ export function listGatedLeads(
   }
   const rows = db
     .prepare(
-      "SELECT * FROM leads WHERE project_id = ? AND status = 'gated' ORDER BY id"
+      "SELECT * FROM leads WHERE project_id = ? AND status NOT IN ('approved', 'rejected', 'scored') ORDER BY id"
     )
     .all(projectId) as unknown as LeadRow[];
   return rows.map(toLead);

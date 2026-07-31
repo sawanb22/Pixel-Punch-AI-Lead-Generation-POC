@@ -3,6 +3,7 @@ import {
   ACTOR_CATALOG,
   DEFAULT_AGENCY_ACTOR_KEYS,
   type ActorKey,
+  findActorEntry,
   isActorKey,
 } from "./actor-catalog.js";
 import type { LeadStrategy } from "./lead-strategy.js";
@@ -20,8 +21,8 @@ const MappingSchema = z.object({
 
 export const StrategicPayloadJobSchema = z.object({
   jobId: z.string().min(1),
-  actorKey: z.string().min(1),
-  actorId: z.string().optional(),
+  actorKey: z.string().optional(),
+  actorId: z.string().min(1),
   reasoning: z.string().min(1),
   apifyInput: z.record(z.string(), z.unknown()),
   mapping: MappingSchema.optional(),
@@ -47,7 +48,7 @@ export interface StrategicPlannerContext {
   volumeTarget?: number;
   feedbackNotes?: string | null;
   websiteSummary?: string | null;
-  enabledActorKeys: ActorKey[];
+  enabledActorKeys?: ActorKey[];
   buyerMode?: LeadStrategy["buyerMode"];
   listName?: string | null;
   listDescription?: string | null;
@@ -105,7 +106,7 @@ export function defaultStrategicPayload(
   const goal = focusLabel
     ? `Find buyer companies for list "${focusLabel}" (${niche}) in ${geo}.`
     : `Find buyer companies for ${ctx.name} (${niche}) in ${geo}.`;
-  const enabled = ctx.enabledActorKeys.filter(isActorKey);
+  const enabled = (ctx.enabledActorKeys || []).filter(isActorKey);
   const keys =
     enabled.length > 0 ? enabled : [...DEFAULT_AGENCY_ACTOR_KEYS];
 
@@ -115,6 +116,7 @@ export function defaultStrategicPayload(
     jobs.push({
       jobId: "fallback-maps-1",
       actorKey: "google_maps",
+      actorId: ACTOR_CATALOG.google_maps.actorId,
       reasoning:
         "Fallback Maps hunt for local SMBs/startups likely to need agency builds.",
       apifyInput: {
@@ -130,6 +132,7 @@ export function defaultStrategicPayload(
     jobs.push({
       jobId: "fallback-wellfound-1",
       actorKey: "wellfound_startups",
+      actorId: ACTOR_CATALOG.wellfound_startups.actorId,
       reasoning:
         "Fallback Wellfound hunt for US startups with hiring/growth signal.",
       apifyInput: {
@@ -145,6 +148,7 @@ export function defaultStrategicPayload(
     jobs.push({
       jobId: "fallback-linkedin-1",
       actorKey: "linkedin_jobs",
+      actorId: ACTOR_CATALOG.linkedin_jobs.actorId,
       reasoning: "Fallback LinkedIn jobs for companies hiring engineers.",
       apifyInput: {
         title: "software engineer",
@@ -159,6 +163,7 @@ export function defaultStrategicPayload(
     jobs.push({
       jobId: "fallback-search-1",
       actorKey: "google_search",
+      actorId: ACTOR_CATALOG.google_search.actorId,
       reasoning:
         "Fallback narrow Google queries for companies needing websites/AI help.",
       apifyInput: {
@@ -181,6 +186,7 @@ export function defaultStrategicPayload(
     jobs.push({
       jobId: `fallback-${key}-1`,
       actorKey: key,
+      actorId: ACTOR_CATALOG[key].actorId,
       reasoning: `Fallback single job for ${key}.`,
       apifyInput: {},
       mapping: ACTOR_CATALOG[key].defaultMapping,
@@ -210,6 +216,23 @@ export function defaultStrategicPayload(
 export function parseStrategicPayload(
   raw: unknown
 ): StrategicPayload | null {
+  if (raw && typeof raw === "object" && "jobs" in raw && Array.isArray((raw as Record<string, unknown>).jobs)) {
+    const rawObj = raw as Record<string, unknown>;
+    const normJobs = (rawObj.jobs as Array<Record<string, unknown>>).map((j) => {
+      if (j && typeof j === "object") {
+        const actorKey = typeof j.actorKey === "string" ? j.actorKey : undefined;
+        const entry = actorKey ? findActorEntry(actorKey) : undefined;
+        const actorId =
+          typeof j.actorId === "string" && j.actorId.trim()
+            ? j.actorId
+            : entry?.actorId ?? actorKey ?? "unknown";
+        return { ...j, actorId };
+      }
+      return j;
+    });
+    const result = StrategicPayloadSchema.safeParse({ ...rawObj, jobs: normJobs });
+    return result.success ? result.data : null;
+  }
   const result = StrategicPayloadSchema.safeParse(raw);
   return result.success ? result.data : null;
 }
@@ -222,7 +245,7 @@ export function mappingForJob(
   job: StrategicPayloadJob
 ): ApifyResultMapping {
   if (job.mapping) return job.mapping;
-  const entry = ACTOR_CATALOG[job.actorKey as ActorKey];
+  const entry = findActorEntry(job.actorKey || "") || findActorEntry(job.actorId || "");
   return entry?.defaultMapping ?? {
     companyField: "title",
     websiteField: "url",

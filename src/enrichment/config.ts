@@ -7,6 +7,8 @@ export interface CompanyEnrichmentConfig {
   respectRobots: boolean;
   autoAfterLeadFinding: boolean;
   useJinaReader: boolean;
+  useApifyContactScraper: boolean;
+  apifyEnrichmentBatchSize: number;
 }
 
 const DEFAULTS: CompanyEnrichmentConfig = {
@@ -18,6 +20,8 @@ const DEFAULTS: CompanyEnrichmentConfig = {
   respectRobots: true,
   autoAfterLeadFinding: false,
   useJinaReader: true,
+  useApifyContactScraper: true,
+  apifyEnrichmentBatchSize: 50,
 };
 
 function asObject(value: unknown): Record<string, unknown> | null {
@@ -51,6 +55,11 @@ export function parseCompanyEnrichmentConfig(
     respectRobots: cfg.respectRobots !== false,
     autoAfterLeadFinding: cfg.autoAfterLeadFinding === true,
     useJinaReader: cfg.useJinaReader !== false,
+    useApifyContactScraper: cfg.useApifyContactScraper !== false,
+    apifyEnrichmentBatchSize:
+      typeof cfg.apifyEnrichmentBatchSize === "number" && cfg.apifyEnrichmentBatchSize > 0
+        ? cfg.apifyEnrichmentBatchSize
+        : DEFAULTS.apifyEnrichmentBatchSize,
   };
 }
 

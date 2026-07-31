@@ -111,19 +111,38 @@ function escapeHtml(s) {
 
 function statusPill(status) {
   const s = String(status || "");
-  const cls =
-    s === "gated"
-      ? "pill-gated"
-      : s === "provisional"
-        ? "pill-provisional"
-        : s === "scored"
-          ? "pill-scored"
-          : s === "approved"
-            ? "pill-approved"
-            : s === "rejected"
-              ? "pill-rejected"
-              : "pill-default";
-  return `<span class="pill ${cls}">${escapeHtml(s || "—")}</span>`;
+  let cls = "pill-default";
+  let label = s || "—";
+
+  if (s === "gated") {
+    cls = "pill-gated";
+  } else if (s === "provisional") {
+    cls = "pill-provisional";
+  } else if (s === "enriching") {
+    cls = "pill-provisional";
+    label = "🔄 Enriching";
+  } else if (s === "enriched") {
+    cls = "pill-gated";
+    label = "✨ Enriched";
+  } else if (s === "enrichment_failed") {
+    cls = "pill-rejected";
+    label = "⚠️ Enrich Failed";
+  } else if (s === "scoring") {
+    cls = "pill-provisional";
+    label = "⏳ Scoring";
+  } else if (s === "scored") {
+    cls = "pill-scored";
+    label = "🎯 Scored";
+  } else if (s === "scoring_failed") {
+    cls = "pill-rejected";
+    label = "❌ Score Failed";
+  } else if (s === "approved") {
+    cls = "pill-approved";
+  } else if (s === "rejected") {
+    cls = "pill-rejected";
+  }
+
+  return `<span class="pill ${cls}">${escapeHtml(label)}</span>`;
 }
 
 function scoreCell(score) {
@@ -394,15 +413,13 @@ function renderLeadPlan(plan, extra = {}) {
   angles.innerHTML = (plan.searchAngles || [])
     .map((q) => `<li>${escapeHtml(q)}</li>`)
     .join("");
-  const keys =
-    extra.resolvedHuntConfig?.enabledActorKeys ||
-    extra.leadStrategy?.enabledActorKeys ||
-    currentLeadStrategy?.enabledActorKeys ||
-    [];
+  const jobKeys = Array.isArray(extra.jobs)
+    ? [...new Set(extra.jobs.map((j) => j.actorKey || j.actorId).filter(Boolean))]
+    : [];
   if (sources) {
-    sources.textContent = keys.length
-      ? `Sources: ${keys.join(", ")}`
-      : "";
+    sources.textContent = jobKeys.length
+      ? `Sources (AI-Selected): ${jobKeys.join(", ")}`
+      : "Sources: AI Auto-Select";
   }
   if (website) {
     const summary = extra.websiteSummary || "";
@@ -752,40 +769,6 @@ function scheduleOpsPoll() {
   }, OPS_POLL_INTERVAL_MS);
 }
 
-async function loadActorCatalog() {
-  try {
-    const data = await api("/api/actor-catalog");
-    actorCatalog = data.actors || [];
-  } catch (_) {
-    actorCatalog = [
-      { key: "google_maps", label: "Google Maps" },
-      { key: "wellfound_startups", label: "Wellfound startups" },
-      { key: "google_search", label: "Google Search" },
-      { key: "linkedin_jobs", label: "LinkedIn jobs" },
-    ];
-  }
-}
-
-function renderEnabledSources(container, selectedKeys) {
-  const keys = new Set(selectedKeys || ["google_maps", "wellfound_startups"]);
-  container.innerHTML = actorCatalog
-    .map(
-      (a) => `<label>
-        <input type="checkbox" name="enabledActor" value="${escapeHtml(a.key)}" ${
-          keys.has(a.key) ? "checked" : ""
-        } />
-        ${escapeHtml(a.label || a.key)}
-      </label>`
-    )
-    .join("");
-}
-
-function selectedEnabledActors(form) {
-  return [...form.querySelectorAll('input[name="enabledActor"]:checked')].map(
-    (el) => el.value
-  );
-}
-
 function openNewProjectDialog() {
   const backdrop = $("new-project-backdrop");
   backdrop.classList.add("open");
@@ -809,23 +792,10 @@ async function openSettingsDialog() {
     return;
   }
   try {
-    if (!actorCatalog.length) await loadActorCatalog();
     const project = await api(`/api/projects/${currentProjectId}`);
     const idx = projects.findIndex((p) => p.id === project.id);
     if (idx >= 0) projects[idx] = project;
     fillProjectFields($("settings-form"), project);
-    let strategy = null;
-    try {
-      strategy = project.leadStrategy
-        ? JSON.parse(project.leadStrategy)
-        : currentLeadStrategy;
-    } catch (_) {
-      strategy = currentLeadStrategy;
-    }
-    renderEnabledSources(
-      $("settings-enabled-sources"),
-      strategy?.enabledActorKeys || ["google_maps", "wellfound_startups"]
-    );
     $("btn-delete-project").disabled = false;
     const backdrop = $("settings-backdrop");
     backdrop.classList.add("open");
@@ -865,6 +835,7 @@ async function loadProjects() {
   }
   if (!projects.length) {
     currentProjectId = null;
+    try { localStorage.removeItem("leadradar_current_project_id"); } catch (_) {}
     updateBrandProject();
     setPlanControlsEnabled(false);
     $("btn-delete-project").disabled = true;
@@ -872,9 +843,23 @@ async function loadProjects() {
     renderActivity(null);
     return;
   }
-  if (!currentProjectId || !projects.some((p) => p.id === currentProjectId)) {
+
+  let savedId = null;
+  try {
+    const raw = localStorage.getItem("leadradar_current_project_id");
+    if (raw) savedId = Number(raw);
+  } catch (_) {}
+
+  if (savedId && projects.some((p) => p.id === savedId)) {
+    currentProjectId = savedId;
+  } else if (!currentProjectId || !projects.some((p) => p.id === currentProjectId)) {
     currentProjectId = projects[0].id;
   }
+
+  try {
+    localStorage.setItem("leadradar_current_project_id", String(currentProjectId));
+  } catch (_) {}
+
   suppressProjectChange = true;
   sel.value = String(currentProjectId);
   suppressProjectChange = false;
@@ -1202,6 +1187,7 @@ function isTypingTarget(el) {
 $("project-select").addEventListener("change", async (e) => {
   if (suppressProjectChange) return;
   currentProjectId = Number(e.target.value);
+  try { localStorage.setItem("leadradar_current_project_id", String(currentProjectId)); } catch (_) {}
   selectedLeadId = null;
   selectedLeadListId = null;
   updateBrandProject();
@@ -1289,11 +1275,6 @@ $("settings-form").addEventListener("submit", async (e) => {
   if (!name) return;
   const geography = String(fd.get("geography") || "").trim();
   const volumeTarget = clampVolume(fd.get("volumeTarget"));
-  const enabledActorKeys = selectedEnabledActors(form);
-  if (!enabledActorKeys.length) {
-    toast("Select at least one lead source", "error");
-    return;
-  }
   try {
     const updated = await api(`/api/projects/${currentProjectId}`, {
       method: "PATCH",
@@ -1306,7 +1287,6 @@ $("settings-form").addEventListener("submit", async (e) => {
         volumeTarget,
         leadStrategy: {
           version: 1,
-          enabledActorKeys,
           defaultGeography: geography || "USA",
           buyerMode: "agency",
         },
@@ -1475,10 +1455,6 @@ function openNewListDialog() {
   const form = $("new-list-form");
   form.reset();
   form.elements.namedItem("volumeTarget").value = "100";
-  renderEnabledSources(
-    $("new-list-enabled-sources"),
-    currentLeadStrategy?.enabledActorKeys || ["google_maps", "wellfound_startups"]
-  );
   form.querySelector('input[name="name"]')?.focus();
 }
 
@@ -1496,10 +1472,6 @@ function fillListSettingsFields(form, list) {
   if (geography) geography.value = resolved.geography || "";
   const volume = form.elements.namedItem("volumeTarget");
   if (volume) volume.value = String(clampVolume(resolved.volumeTarget ?? 100));
-  renderEnabledSources(
-    $("list-settings-enabled-sources"),
-    resolved.enabledActorKeys || ["google_maps", "wellfound_startups"]
-  );
 }
 
 function openListSettingsDialog() {
@@ -1521,7 +1493,6 @@ function closeListSettingsDialog() {
 }
 
 $("btn-new-list").addEventListener("click", async () => {
-  if (!actorCatalog.length) await loadActorCatalog();
   openNewListDialog();
 });
 $("btn-cancel-list").addEventListener("click", closeNewListDialog);
@@ -1530,7 +1501,6 @@ $("new-list-backdrop").addEventListener("click", (e) => {
 });
 
 $("btn-list-settings").addEventListener("click", async () => {
-  if (!actorCatalog.length) await loadActorCatalog();
   await loadLeadLists();
   openListSettingsDialog();
 });
@@ -1555,12 +1525,7 @@ $("list-settings-form").addEventListener("submit", async (e) => {
   const description = String(fd.get("description") || "").trim() || null;
   const geography = String(fd.get("geography") || "").trim() || null;
   const volumeTarget = clampVolume(fd.get("volumeTarget"));
-  const enabledActorKeys = selectedEnabledActors(e.target);
   if (!name) return;
-  if (!enabledActorKeys.length) {
-    toast("Select at least one lead source", "error");
-    return;
-  }
   try {
     await api(
       `/api/projects/${currentProjectId}/lead-lists/${selectedLeadListId}`,
@@ -1571,7 +1536,6 @@ $("list-settings-form").addEventListener("submit", async (e) => {
           description,
           geography,
           volumeTarget,
-          enabledActorKeys,
           regeneratePlan: regenerate,
         }),
       }
@@ -1596,11 +1560,6 @@ $("new-list-form").addEventListener("submit", async (e) => {
   if (!name) return;
   const geography = String(fd.get("geography") || "").trim() || null;
   const volumeTarget = clampVolume(fd.get("volumeTarget"));
-  const enabledActorKeys = selectedEnabledActors(e.target);
-  if (!enabledActorKeys.length) {
-    toast("Select at least one lead source", "error");
-    return;
-  }
   try {
     const created = await api(`/api/projects/${currentProjectId}/lead-lists`, {
       method: "POST",
@@ -1609,7 +1568,6 @@ $("new-list-form").addEventListener("submit", async (e) => {
         description: String(fd.get("description") || "").trim() || null,
         geography,
         volumeTarget,
-        enabledActorKeys,
         activate: true,
       }),
     });

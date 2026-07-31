@@ -1,10 +1,11 @@
 import type { DB } from "../db/database.js";
 import { getProject } from "../projects/projects.repo.js";
-import { listGatedLeads, saveScore } from "../leads/leads.repo.js";
+import { listGatedLeads, saveScore, setLeadPipelineStatus } from "../leads/leads.repo.js";
 import { getActiveLeadListId } from "../leads/lead-lists.repo.js";
 import type { FeedbackRag } from "../rag/feedback-rag.js";
 import { FileFeedbackRag } from "../rag/file-feedback-rag.js";
 import type { Scorer } from "./scorer.js";
+import { withRetry } from "../utils/with-retry.js";
 
 export interface ScoringSummary {
   scored: number;
@@ -51,16 +52,21 @@ export async function runScoring(
   for (const lead of gated) {
     index++;
     options?.onProgress?.(`Scoring lead ${index}/${gated.length}: ${lead.company}`);
+    setLeadPipelineStatus(db, projectId, lead.id, "scoring");
     try {
       const query = [lead.company, lead.website ?? "", project.icp ?? ""]
         .filter((p) => p.length > 0)
         .join(" ");
       const similar = rag ? rag.similar(projectId, query, k) : [];
-      const result = await scorer.scoreLead(lead, project, { similar });
+      const result = await withRetry(
+        () => scorer.scoreLead(lead, project, { similar }),
+        { attempts: 3, baseDelayMs: 500 }
+      );
       saveScore(db, projectId, lead.id, result.score, result.reasons, result.draft);
       scored++;
     } catch (err) {
       errors++;
+      setLeadPipelineStatus(db, projectId, lead.id, "scoring_failed");
       const msg = err instanceof Error ? err.message : String(err);
       errorMessages.push(`lead ${lead.id} (${lead.company}): ${msg}`);
     }

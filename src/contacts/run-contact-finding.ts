@@ -2,8 +2,15 @@ import type { DB } from "../db/database.js";
 import type { FetchLike } from "../sources/source.js";
 import { listLeadsFiltered } from "../leads/leads.repo.js";
 import { getCompanyProfile } from "../enrichment/enrichment.repo.js";
-import { fetchHtmlPage } from "../enrichment/page-fetcher.js";
-import { extractContactsFromMarkdown, buildPeoplePageUrl } from "./linkedin-extractor.js";
+import { getProject } from "../projects/projects.repo.js";
+import { ApifyClient } from "../discovery/apify-client.js";
+import { withRetry } from "../utils/with-retry.js";
+import {
+  parseLinkedInSearchResultItem,
+  buildPeoplePageUrl,
+  extractContactsFromMarkdown,
+  type GoogleSearchResultItem,
+} from "./linkedin-extractor.js";
 import {
   insertContact,
   listContactsForLead,
@@ -12,43 +19,50 @@ import {
 import type { ContactFindingSummary, Contact } from "./types.js";
 
 export interface ContactFindingOptions {
-  fetch: FetchLike;
+  fetch?: FetchLike;
   db: DB;
   projectId: number;
   /** Max contacts to keep per lead. Default: 5 */
   maxContactsPerLead?: number;
   /** Whether to re-run for leads that already have contacts. Default: false */
   refresh?: boolean;
-  /** Jina Reader API key override (falls back to JINA_API_KEY env). */
+  /** Apify Client instance override. */
+  apifyClient?: ApifyClient;
+  /** Environment variables. */
+  env?: NodeJS.ProcessEnv;
+  /** Jina Reader API key override (legacy fallback). */
   jinaApiKey?: string;
   onProgress?: (message: string, level?: "info" | "warning" | "error") => void;
 }
 
+const DEFAULT_TARGET_ROLES = [
+  "CEO",
+  "Founder",
+  "Co-Founder",
+  "Owner",
+  "President",
+  "Managing Director",
+  "VP",
+  "Director",
+];
 
 /**
- * Find decision-maker contacts for all enriched leads in a project.
- *
- * Strategy per lead:
- * 1. Look up `company_profiles` for the lead's domain → get LinkedIn company URL.
- * 2. Build the LinkedIn /people page URL.
- * 3. Fetch via Jina Reader (bypasses LinkedIn bot-detection).
- * 4. Parse returned markdown for person names, titles, LinkedIn profile URLs.
- * 5. Store top N contacts in the `contacts` table.
+ * Find decision-maker contacts for all eligible leads in a project using Apify.
  */
 export async function runContactFinding(
   options: ContactFindingOptions
 ): Promise<ContactFindingSummary> {
   const {
-    fetch,
+    fetch: fetchImpl,
     db,
     projectId,
     maxContactsPerLead = 5,
     refresh = false,
-    jinaApiKey,
+    env = process.env,
     onProgress,
   } = options;
 
-  // Fetch all leads for this project that have a canonical domain
+  const project = getProject(db, projectId);
   const leads = listLeadsFiltered(db, projectId);
   const eligibleLeads = leads.filter((l) => l.canonicalDomain);
 
@@ -58,168 +72,242 @@ export async function runContactFinding(
   let contactsFound = 0;
   let failed = 0;
   const allContacts: Contact[] = [];
-  let index = 0;
 
-  for (const lead of eligibleLeads) {
-    const domain = lead.canonicalDomain!;
-    index++;
-    onProgress?.(`Finding contacts for lead ${index}/${eligibleLeads.length}: ${domain}`);
-
-
-    // Skip if already has contacts and not refreshing
-    if (!refresh) {
-      const existing = listContactsForLead(db, lead.id);
-      if (existing.length > 0) {
-        allContacts.push(...existing);
-        contactsFound += existing.length;
-        leadsProcessed++;
-        continue;
-      }
+  // 1. Identify leads that need processing
+  const leadsToProcess = eligibleLeads.filter((lead) => {
+    if (refresh) return true;
+    const existing = listContactsForLead(db, lead.id);
+    if (existing.length > 0) {
+      allContacts.push(...existing);
+      contactsFound += existing.length;
+      leadsProcessed++;
+      return false;
     }
+    return true;
+  });
 
-    // Get the company profile to extract the LinkedIn URL if available
-    const profile = getCompanyProfile(db, projectId, domain);
-    const socialLinks = profile?.socialLinks ?? {};
-    const peoplePageUrl = buildPeoplePageUrl(socialLinks);
+  if (leadsToProcess.length === 0) {
+    onProgress?.(`Contact finding complete. All ${leadsProcessed} leads already had contacts.`);
+    return { leadsProcessed, contactsFound, failed, contacts: allContacts };
+  }
 
-    if (!peoplePageUrl) {
-      // No LinkedIn URL found — first try extracting company profile emails found during enrichment
-      const emailCandidates = profile?.emailCandidates ?? [];
-      if (emailCandidates.length > 0) {
-        if (refresh) deleteContactsForLead(db, lead.id);
-        for (const email of emailCandidates.slice(0, maxContactsPerLead)) {
-          const contact = insertContact(db, {
-            projectId,
-            leadId: lead.id,
-            domain,
-            fullName: `${domain} Contact`,
-            title: "General Contact / Inquiries",
-            linkedinUrl: null,
-            confidence: 0.7,
-            source: "website-enrichment",
-          });
-          allContacts.push(contact);
-          contactsFound++;
-        }
-        leadsProcessed++;
-        continue;
+  // 2. Setup Apify Client if token is available
+  const token = env.APIFY_TOKEN?.trim();
+  const client =
+    options.apifyClient ??
+    (token ? new ApifyClient({ token, fetch: fetchImpl }) : null);
+
+  if (client) {
+    onProgress?.(`Using Apify to discover contacts for ${leadsToProcess.length} leads...`);
+
+    // Process in batches of 10 leads to run efficient Apify Google Search jobs
+    const BATCH_SIZE = 10;
+    for (let i = 0; i < leadsToProcess.length; i += BATCH_SIZE) {
+      const batch = leadsToProcess.slice(i, i + BATCH_SIZE);
+      const queryMap = new Map<string, number>(); // search query string -> leadId
+      const queries: string[] = [];
+
+      for (const lead of batch) {
+        const domain = lead.canonicalDomain!;
+        const companyName = lead.company || domain.replace(/\.[a-z]+$/, "");
+        const roleQuery = DEFAULT_TARGET_ROLES.map((r) => `"${r}"`).join(" OR ");
+        const query = `site:linkedin.com/in (${roleQuery}) "${companyName}"`;
+        queries.push(query);
+        queryMap.set(query.toLowerCase(), lead.id);
       }
 
-      // No profile emails — try guessing LinkedIn domain slug
-      const domainSlug = domain.replace(/\.(com|io|co|net|org|ai)$/, "").replace(/\./g, "-");
-      const guessedUrl = `https://www.linkedin.com/company/${domainSlug}/people`;
+      onProgress?.(
+        `Searching contacts via Apify (batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(
+          leadsToProcess.length / BATCH_SIZE
+        )})...`
+      );
 
       try {
-        const page = await fetchViaJinaOnly(guessedUrl, fetch, jinaApiKey);
-        if (page) {
-          const parsed = extractContactsFromMarkdown(page).slice(0, maxContactsPerLead);
-          if (parsed.length > 0) {
-            if (refresh) deleteContactsForLead(db, lead.id);
-            for (const c of parsed) {
-              const contact = insertContact(db, {
-                projectId,
-                leadId: lead.id,
-                domain,
-                fullName: c.fullName,
-                title: c.title,
-                linkedinUrl: c.linkedinUrl,
-                confidence: c.confidence * 0.8, // lower confidence for guessed URL
-                source: "linkedin-guessed",
-              });
-              allContacts.push(contact);
-              contactsFound++;
+        const apifyResult = await withRetry(
+          () =>
+            client.runActorAndGetItems({
+              actorId: "apify/google-search-scraper",
+              input: {
+                queries: queries.join("\n"),
+                maxPagesPerQuery: 1,
+                resultsPerPage: 5,
+                csvFriendlyOutput: true,
+              },
+              timeoutMs: 120_000,
+            }),
+          { attempts: 3, baseDelayMs: 2000 }
+        );
+
+        const items = (apifyResult.items as GoogleSearchResultItem[]) || [];
+        const contactsByLead = new Map<number, Contact[]>();
+
+        for (const item of items) {
+          const parsed = parseLinkedInSearchResultItem(item);
+          if (!parsed) continue;
+
+          // Find which lead this item belongs to
+          const rawTerm = item.searchQuery?.term?.toLowerCase() ?? "";
+          let matchingLeadId: number | null = null;
+
+          for (const [qTerm, lId] of queryMap.entries()) {
+            if (rawTerm.includes(qTerm) || rawTerm === qTerm) {
+              matchingLeadId = lId;
+              break;
             }
-            leadsProcessed++;
-            continue;
+          }
+
+          if (!matchingLeadId) {
+            // Fallback match by company name or domain in title/snippet
+            for (const lead of batch) {
+              const dom = lead.canonicalDomain!.toLowerCase();
+              const comp = lead.company.toLowerCase();
+              const blob = `${item.title ?? ""} ${item.snippet ?? ""}`.toLowerCase();
+              if (blob.includes(dom) || blob.includes(comp)) {
+                matchingLeadId = lead.id;
+                break;
+              }
+            }
+          }
+
+          if (!matchingLeadId) continue;
+
+          const lead = batch.find((b) => b.id === matchingLeadId);
+          if (!lead) continue;
+
+          if (!contactsByLead.has(lead.id)) {
+            contactsByLead.set(lead.id, []);
+          }
+          const list = contactsByLead.get(lead.id)!;
+          if (
+            list.length < maxContactsPerLead &&
+            !list.some((c) => c.linkedinUrl === parsed.linkedinUrl)
+          ) {
+            if (refresh) deleteContactsForLead(db, lead.id);
+            const inserted = insertContact(db, {
+              projectId,
+              leadId: lead.id,
+              domain: lead.canonicalDomain!,
+              fullName: parsed.fullName,
+              title: parsed.title,
+              linkedinUrl: parsed.linkedinUrl,
+              confidence: parsed.confidence,
+              source: "apify-google-search",
+            });
+            list.push(inserted);
+            allContacts.push(inserted);
+            contactsFound++;
           }
         }
-      } catch {
-        // silent — move on
+
+        for (const lead of batch) {
+          const foundList = contactsByLead.get(lead.id);
+          if (foundList && foundList.length > 0) {
+            leadsProcessed++;
+          } else {
+            // Fallback for this lead
+            const fallbackOk = tryEnrichmentFallback(
+              db,
+              projectId,
+              lead,
+              maxContactsPerLead,
+              refresh,
+              allContacts
+            );
+            if (fallbackOk) {
+              leadsProcessed++;
+              contactsFound += fallbackOk;
+            } else {
+              failed++;
+            }
+          }
+        }
+      } catch (err) {
+        onProgress?.(
+          `Apify contact search batch failed: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+          "warning"
+        );
+        // Fallback batch to enrichment email candidates
+        for (const lead of batch) {
+          const fallbackOk = tryEnrichmentFallback(
+            db,
+            projectId,
+            lead,
+            maxContactsPerLead,
+            refresh,
+            allContacts
+          );
+          if (fallbackOk) {
+            leadsProcessed++;
+            contactsFound += fallbackOk;
+          } else {
+            failed++;
+          }
+        }
       }
-      failed++;
-      continue;
     }
-
-    try {
-      const markdown = await fetchViaJinaOnly(peoplePageUrl, fetch, jinaApiKey);
-      if (!markdown) {
-        failed++;
-        continue;
-      }
-
-      const parsed = extractContactsFromMarkdown(markdown).slice(0, maxContactsPerLead);
-      if (parsed.length === 0) {
-        failed++;
-        continue;
-      }
-
-      if (refresh) deleteContactsForLead(db, lead.id);
-
-      for (const c of parsed) {
-        const contact = insertContact(db, {
-          projectId,
-          leadId: lead.id,
-          domain,
-          fullName: c.fullName,
-          title: c.title,
-          linkedinUrl: c.linkedinUrl,
-          confidence: c.confidence,
-          source: "linkedin",
-        });
-        allContacts.push(contact);
-        contactsFound++;
-      }
-
-      leadsProcessed++;
-    } catch (err) {
-      console.error(
-        `[contact-finding] Failed for ${domain}: ${err instanceof Error ? err.message : String(err)}`
+  } else {
+    onProgress?.(
+      `APIFY_TOKEN not available. Using website enrichment email candidates for contacts.`,
+      "warning"
+    );
+    for (const lead of leadsToProcess) {
+      const fallbackOk = tryEnrichmentFallback(
+        db,
+        projectId,
+        lead,
+        maxContactsPerLead,
+        refresh,
+        allContacts
       );
-      failed++;
+      if (fallbackOk) {
+        leadsProcessed++;
+        contactsFound += fallbackOk;
+      } else {
+        failed++;
+      }
     }
   }
 
-  onProgress?.(`Contact finding complete. Processed: ${leadsProcessed}, Contacts found: ${contactsFound}, Failed: ${failed}`);
+  onProgress?.(
+    `Contact finding complete. Processed: ${leadsProcessed}, Contacts found: ${contactsFound}, Failed: ${failed}`
+  );
   return { leadsProcessed, contactsFound, failed, contacts: allContacts };
 }
 
+function tryEnrichmentFallback(
+  db: DB,
+  projectId: number,
+  lead: { id: number; canonicalDomain: string | null },
+  maxContactsPerLead: number,
+  refresh: boolean,
+  allContacts: Contact[]
+): number | null {
+  if (!lead.canonicalDomain) return null;
+  const domain = lead.canonicalDomain;
+  const profile = getCompanyProfile(db, projectId, domain);
+  const emailCandidates = profile?.emailCandidates ?? [];
 
-/**
- * Fetch a URL purely via the Jina Reader API and return the markdown body,
- * or null if Jina is not configured or returns no content.
- */
-async function fetchViaJinaOnly(
-  url: string,
-  fetchFn: FetchLike,
-  jinaApiKey?: string
-): Promise<string | null> {
-  const apiKey = jinaApiKey ?? process.env.JINA_API_KEY;
-  if (!apiKey) return null;
-
-  const jinaUrl = `https://r.jina.ai/${url}`;
-  try {
-    const res = await fetchFn(jinaUrl, {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        Accept: "application/json",
-        "X-Return-Format": "markdown",
-        "X-No-Cache": "true",
-      },
-    });
-    if (!res.ok) return null;
-
-    const text = await res.text();
-    if (!text || text.length < 100) return null;
-
-    // Jina returns JSON with data.content
-    try {
-      const json = JSON.parse(text) as { data?: { content?: string } };
-      return json.data?.content ?? null;
-    } catch {
-      // Plain text / markdown fallback
-      return text;
+  if (emailCandidates.length > 0) {
+    if (refresh) deleteContactsForLead(db, lead.id);
+    let added = 0;
+    for (const email of emailCandidates.slice(0, maxContactsPerLead)) {
+      const contact = insertContact(db, {
+        projectId,
+        leadId: lead.id,
+        domain,
+        fullName: `${domain} Contact`,
+        title: "General Contact / Inquiries",
+        email,
+        linkedinUrl: null,
+        confidence: 0.7,
+        source: "website-enrichment",
+      });
+      allContacts.push(contact);
+      added++;
     }
-  } catch {
-    return null;
+    return added;
   }
+  return null;
 }

@@ -87,7 +87,7 @@ function jobsFromPayloadJson(raw: string | null): RunRevisionBriefJob[] {
     const payload = parseStrategicPayload(parsed);
     if (!payload) return [];
     return payload.jobs.slice(0, MAX_JOBS).map((j) => ({
-      actorKey: String(j.actorKey),
+      actorKey: String(j.actorKey ?? j.actorId),
       jobId: String(j.jobId),
       inputSummary: summarizeJobInput(
         (j.apifyInput ?? {}) as Record<string, unknown>

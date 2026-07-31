@@ -36,11 +36,9 @@ describe("runScoring", () => {
       { company: "A", website: "a.com", canonicalDomain: "a.com", email: "a@a.com", votes: 1, source: "csv", sources: ["csv"] },
       { company: "B", website: "b.com", canonicalDomain: "b.com", email: "b@b.com", votes: 1, source: "csv", sources: ["csv"] },
     ]);
-    let calls = 0;
     const flaky: Scorer = {
       async scoreLead(lead: Lead, _project: Project) {
-        calls++;
-        if (calls === 1) throw new Error("boom");
+        if (lead.company === "A") throw new Error("boom");
         return { score: 70, reasons: "ok" };
       },
     };

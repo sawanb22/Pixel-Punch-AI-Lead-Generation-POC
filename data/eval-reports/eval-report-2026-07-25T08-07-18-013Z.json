@@ -1,0 +1,266 @@
+[
+  {
+    "icpId": "icp_local_services",
+    "totalBatchesExecuted": 5,
+    "batchSummaries": [
+      {
+        "batchIndex": 1,
+        "leadsAdded": 2,
+        "totalLeadsInDb": 2,
+        "dedupSkippedCount": 0,
+        "enrichedCount": 2,
+        "scoredCount": 2,
+        "failedCount": 0,
+        "durationMs": 32
+      },
+      {
+        "batchIndex": 2,
+        "leadsAdded": 0,
+        "totalLeadsInDb": 2,
+        "dedupSkippedCount": 3,
+        "enrichedCount": 2,
+        "scoredCount": 2,
+        "failedCount": 0,
+        "durationMs": 3
+      },
+      {
+        "batchIndex": 3,
+        "leadsAdded": 0,
+        "totalLeadsInDb": 2,
+        "dedupSkippedCount": 3,
+        "enrichedCount": 2,
+        "scoredCount": 2,
+        "failedCount": 0,
+        "durationMs": 5
+      },
+      {
+        "batchIndex": 4,
+        "leadsAdded": 0,
+        "totalLeadsInDb": 2,
+        "dedupSkippedCount": 3,
+        "enrichedCount": 2,
+        "scoredCount": 2,
+        "failedCount": 0,
+        "durationMs": 3
+      },
+      {
+        "batchIndex": 5,
+        "leadsAdded": 0,
+        "totalLeadsInDb": 2,
+        "dedupSkippedCount": 3,
+        "enrichedCount": 2,
+        "scoredCount": 2,
+        "failedCount": 0,
+        "durationMs": 3
+      }
+    ],
+    "plannerReport": {
+      "icpId": "icp_local_services",
+      "icpName": "Local Services (Plumbing & HVAC)",
+      "precisionResult": {
+        "validJobs": 2,
+        "totalJobs": 2,
+        "precision": 1,
+        "knownActorsUsed": 2,
+        "queryRelevanceScore": 1
+      },
+      "keywordAlignmentScore": 1,
+      "actorMatchScore": 1,
+      "passed": true
+    },
+    "enrichmentReport": {
+      "totalProfilesEvaluated": 2,
+      "averageYieldRate": 1,
+      "descriptionExtractionRate": 1,
+      "emailDiscoveryRate": 1,
+      "socialDiscoveryRate": 1,
+      "locationDiscoveryRate": 1,
+      "hallucinatedEmailCount": 2,
+      "passed": true,
+      "profileReports": [
+        {
+          "domain": "austinprecisionplumbing.com",
+          "fidelity": {
+            "yieldRate": 1,
+            "hasDescription": true,
+            "emailCount": 1,
+            "socialCount": 1,
+            "hasLocation": true,
+            "confidence": 0.8,
+            "hallucinatedEmails": [
+              "1.austinprecisionplumbing.com@example.com"
+            ]
+          }
+        },
+        {
+          "domain": "lonestarhvacair.com",
+          "fidelity": {
+            "yieldRate": 1,
+            "hasDescription": true,
+            "emailCount": 1,
+            "socialCount": 1,
+            "hasLocation": true,
+            "confidence": 0.8,
+            "hallucinatedEmails": [
+              "1.lonestarhvacair.com@example.com"
+            ]
+          }
+        }
+      ]
+    },
+    "contactReport": {
+      "totalContactsEvaluated": 2,
+      "overallDecisionMakerRatio": 1,
+      "overallValidLinkedinRatio": 1,
+      "overallValidEmailRatio": 1,
+      "hallucinatedUrlCount": 0,
+      "passed": true,
+      "seniorityResult": {
+        "totalContacts": 2,
+        "decisionMakerCount": 2,
+        "decisionMakerRatio": 1,
+        "validLinkedinCount": 2,
+        "validEmailCount": 2,
+        "hallucinatedUrls": []
+      }
+    },
+    "scorerReport": {
+      "totalLeadsScored": 2,
+      "averageScore": 55,
+      "scoreSpread": {
+        "min": 55,
+        "max": 55
+      },
+      "spearmanCorrelation": 1,
+      "passed": false
+    },
+    "dedupEfficiency": 1,
+    "overallFailureRate": 0,
+    "passed": false
+  },
+  {
+    "icpId": "icp_b2b_saas",
+    "totalBatchesExecuted": 5,
+    "batchSummaries": [
+      {
+        "batchIndex": 1,
+        "leadsAdded": 1,
+        "totalLeadsInDb": 1,
+        "dedupSkippedCount": 0,
+        "enrichedCount": 1,
+        "scoredCount": 1,
+        "failedCount": 0,
+        "durationMs": 1
+      },
+      {
+        "batchIndex": 2,
+        "leadsAdded": 0,
+        "totalLeadsInDb": 1,
+        "dedupSkippedCount": 2,
+        "enrichedCount": 1,
+        "scoredCount": 1,
+        "failedCount": 0,
+        "durationMs": 2
+      },
+      {
+        "batchIndex": 3,
+        "leadsAdded": 0,
+        "totalLeadsInDb": 1,
+        "dedupSkippedCount": 2,
+        "enrichedCount": 1,
+        "scoredCount": 1,
+        "failedCount": 0,
+        "durationMs": 1
+      },
+      {
+        "batchIndex": 4,
+        "leadsAdded": 0,
+        "totalLeadsInDb": 1,
+        "dedupSkippedCount": 2,
+        "enrichedCount": 1,
+        "scoredCount": 1,
+        "failedCount": 0,
+        "durationMs": 2
+      },
+      {
+        "batchIndex": 5,
+        "leadsAdded": 0,
+        "totalLeadsInDb": 1,
+        "dedupSkippedCount": 2,
+        "enrichedCount": 1,
+        "scoredCount": 1,
+        "failedCount": 0,
+        "durationMs": 1
+      }
+    ],
+    "plannerReport": {
+      "icpId": "icp_b2b_saas",
+      "icpName": "B2B SaaS DevTools",
+      "precisionResult": {
+        "validJobs": 2,
+        "totalJobs": 2,
+        "precision": 1,
+        "knownActorsUsed": 2,
+        "queryRelevanceScore": 1
+      },
+      "keywordAlignmentScore": 1,
+      "actorMatchScore": 1,
+      "passed": true
+    },
+    "enrichmentReport": {
+      "totalProfilesEvaluated": 1,
+      "averageYieldRate": 1,
+      "descriptionExtractionRate": 1,
+      "emailDiscoveryRate": 1,
+      "socialDiscoveryRate": 1,
+      "locationDiscoveryRate": 1,
+      "hallucinatedEmailCount": 1,
+      "passed": true,
+      "profileReports": [
+        {
+          "domain": "devsync.io",
+          "fidelity": {
+            "yieldRate": 1,
+            "hasDescription": true,
+            "emailCount": 1,
+            "socialCount": 1,
+            "hasLocation": true,
+            "confidence": 0.8,
+            "hallucinatedEmails": [
+              "1.devsync.io@example.com"
+            ]
+          }
+        }
+      ]
+    },
+    "contactReport": {
+      "totalContactsEvaluated": 1,
+      "overallDecisionMakerRatio": 1,
+      "overallValidLinkedinRatio": 1,
+      "overallValidEmailRatio": 1,
+      "hallucinatedUrlCount": 0,
+      "passed": true,
+      "seniorityResult": {
+        "totalContacts": 1,
+        "decisionMakerCount": 1,
+        "decisionMakerRatio": 1,
+        "validLinkedinCount": 1,
+        "validEmailCount": 1,
+        "hallucinatedUrls": []
+      }
+    },
+    "scorerReport": {
+      "totalLeadsScored": 1,
+      "averageScore": 55,
+      "scoreSpread": {
+        "min": 55,
+        "max": 55
+      },
+      "spearmanCorrelation": null,
+      "passed": false
+    },
+    "dedupEfficiency": 1,
+    "overallFailureRate": 0,
+    "passed": false
+  }
+]

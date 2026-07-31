@@ -2,7 +2,12 @@ export const LEAD_STATUSES = [
   "raw",
   "gated",
   "provisional",
+  "enriching",
+  "enriched",
+  "enrichment_failed",
+  "scoring",
   "scored",
+  "scoring_failed",
   "approved",
   "rejected",
 ] as const;

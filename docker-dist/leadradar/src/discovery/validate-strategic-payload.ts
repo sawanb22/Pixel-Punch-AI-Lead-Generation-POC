@@ -1,6 +1,7 @@
 import {
   ACTOR_CATALOG,
   type ActorKey,
+  findActorEntry,
   isActorKey,
 } from "./actor-catalog.js";
 import type { LeadFindingSourceConfig } from "./lead-finding-config.js";
@@ -118,8 +119,11 @@ export function validateStrategicPayload(
 ): ValidateStrategicPayloadResult {
   const notes: string[] = [];
   const droppedJobs: string[] = [];
+  const hasRestriction = Boolean(
+    ctx.enabledActorKeys && ctx.enabledActorKeys.length > 0
+  );
   const enabled = new Set(
-    ctx.enabledActorKeys.filter(isActorKey) as ActorKey[]
+    (ctx.enabledActorKeys || []).filter(isActorKey) as ActorKey[]
   );
   const volume = clampVolumeTarget(ctx.volumeTarget ?? 100);
   const parsed = parseStrategicPayload(raw);
@@ -138,7 +142,13 @@ export function validateStrategicPayload(
   const keptJobs: StrategicPayloadJob[] = [];
 
   for (const job of parsed.jobs) {
-    if (!isActorKey(job.actorKey) || !enabled.has(job.actorKey)) {
+    const isCatalogKey = isActorKey(job.actorKey);
+    const isAllowedCatalogKey = hasRestriction
+      ? isCatalogKey && enabled.has(job.actorKey as ActorKey)
+      : isCatalogKey;
+    const isDynamicMcpActor = Boolean(job.actorId && job.actorId.trim().length > 0);
+
+    if (!isAllowedCatalogKey && !isDynamicMcpActor) {
       droppedJobs.push(`${job.jobId}: actor_not_in_pool (${job.actorKey})`);
       continue;
     }
@@ -149,7 +159,7 @@ export function validateStrategicPayload(
     }
     keptJobs.push({
       ...job,
-      apifyInput: capApifyInput(job.actorKey, job.apifyInput, volume),
+      apifyInput: isCatalogKey ? capApifyInput(job.actorKey as ActorKey, job.apifyInput, volume) : job.apifyInput,
       mapping: mappingForJob(job),
     });
   }
@@ -198,12 +208,13 @@ export function strategicPayloadToJobs(
 } {
   const volume = clampVolumeTarget(payload.volumeTarget);
   const sources: LeadFindingSourceConfig[] = payload.jobs.map((job, i) => {
-    const entry = ACTOR_CATALOG[job.actorKey as ActorKey];
+    const entry = findActorEntry(job.actorKey) || findActorEntry(job.actorId || "");
+    const actorId = job.actorId?.trim() || entry?.actorId || "compass/crawler-google-places";
     return {
       id: job.jobId || `apify-${job.actorKey}-${i + 1}`,
       type: "apify" as const,
       enabled: true,
-      actorId: entry?.actorId,
+      actorId,
       discoveryQuery: job.reasoning,
       input: job.apifyInput,
       mapping: mappingForJob(job),

@@ -170,6 +170,8 @@ export const DEFAULT_AGENCY_ACTOR_KEYS: ActorKey[] = [
   "wellfound_startups",
 ];
 
+export const ALL_ACTOR_KEYS: ActorKey[] = Object.keys(ACTOR_CATALOG) as ActorKey[];
+
 export function listActorCatalog(): ActorCatalogEntry[] {
   return Object.values(ACTOR_CATALOG);
 }
@@ -178,15 +180,33 @@ export function getActorEntry(key: string): ActorCatalogEntry | undefined {
   return ACTOR_CATALOG[key as ActorKey];
 }
 
+export function findActorEntry(keyOrId: string): ActorCatalogEntry | undefined {
+  if (!keyOrId?.trim()) return undefined;
+  const raw = keyOrId.trim().toLowerCase().replace(/[-_]/g, "");
+  if (keyOrId in ACTOR_CATALOG) return ACTOR_CATALOG[keyOrId as ActorKey];
+  for (const entry of Object.values(ACTOR_CATALOG)) {
+    const k = entry.key.toLowerCase().replace(/[-_]/g, "");
+    const a = entry.actorId.toLowerCase().replace(/[-_]/g, "");
+    if (raw === k || raw === a || raw.includes(k) || k.includes(raw)) {
+      return entry;
+    }
+  }
+  return undefined;
+}
+
 export function isActorKey(key: string): key is ActorKey {
   return key in ACTOR_CATALOG;
 }
 
-export function catalogForPlanner(enabledKeys: ActorKey[]): string {
-  return enabledKeys
+export function catalogForPlanner(enabledKeys?: ActorKey[]): string {
+  const keys = enabledKeys && enabledKeys.length > 0 ? enabledKeys : ALL_ACTOR_KEYS;
+  return keys
     .map((key) => {
       const entry = ACTOR_CATALOG[key];
+      if (!entry) return null;
       return `- ${entry.key} (${entry.actorId}): ${entry.descriptionForPlanner} Input shape: ${entry.inputHints}`;
     })
+    .filter(Boolean)
     .join("\n");
 }
+

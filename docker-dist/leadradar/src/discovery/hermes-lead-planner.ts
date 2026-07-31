@@ -40,11 +40,12 @@ Reply with ONLY a JSON object (no markdown) with this exact shape:
 }
 
 Rules:
-- Select the best scrapers/actors for the specific industry, niche, and geography requested. Prefer enabled actor keys, but for specialized niches (e.g. tourism, hotels, local services) you may recommend specialized Apify store actor keys (like tripadvisor_scraper, yelp_scraper, instagram_profiles, google_maps).
+- Select the best scrapers/actors for the specific industry, niche, and geography requested. You have full freedom to choose any scrapers from the catalog or recommend specialized Apify store actors.
+- For each job: set "actorKey" to the matching catalog key (e.g. google_maps, tripadvisor_scraper, yelp_scraper, instagram_profiles, wellfound_startups) and ALWAYS set "actorId" to the full Apify actor ID string (e.g. "compass/crawler-google-places", "apify/tripadvisor-scraper", "apify/yelp-scraper", "apify/instagram-profile-scraper").
 - Strictly target potential BUYER companies, clients, or prospects matching the project's ICP, product description, and campaign list focus — filter out irrelevant competitors, blogs, directory listicles, or vendors.
 - If geography is empty or USA, pick major relevant target hubs/cities.
 - Apply negatives and user feedback as hard constraints.
-- Include 1–3 jobs max. Each job needs clear reasoning matching the project's goal.`;
+- Include 1–5 jobs max. Each job needs clear reasoning matching the project's goal.`;
 
 function extractJsonObject(text: string): unknown {
   const trimmed = text.trim();
@@ -109,7 +110,7 @@ export class HermesLeadPlanner {
       options.model ??
       process.env.HERMES_PLAN_MODEL ??
       "hermes-lead-planner";
-    this.timeoutMs = options.timeoutMs ?? 20_000;
+    this.timeoutMs = options.timeoutMs ?? 30_000;
   }
 
   /** @deprecated Prefer generateStrategicPayload; kept for LeadPlan UI compatibility. */
@@ -128,10 +129,7 @@ export class HermesLeadPlanner {
       volumeTarget: input.volumeTarget,
       feedbackNotes: input.feedbackNotes,
       websiteSummary: input.websiteSummary,
-      enabledActorKeys: input.enabledActorKeys ?? [
-        "google_maps",
-        "wellfound_startups",
-      ],
+      enabledActorKeys: input.enabledActorKeys,
       buyerMode: input.buyerMode ?? "agency",
     };
     const result = await this.generateStrategicPayload(ctx);
@@ -177,7 +175,8 @@ export class HermesLeadPlanner {
         fromFallback: false,
         plannerInput,
       };
-    } catch {
+    } catch (err) {
+      console.warn("[HermesLeadPlanner] Hermes call failed, using default fallback payload:", err);
       const payload = defaultStrategicPayload(input);
       return {
         payload,
@@ -209,8 +208,8 @@ export class HermesLeadPlanner {
         : null,
       `Geography: ${input.geography ?? "(any — default US hubs for Maps)"}`,
       `Volume target: ${volume}`,
-      `Enabled actor keys (ONLY use these):\n${enabled.map((k) => `- ${k}`).join("\n")}`,
-      `Actor details:\n${catalogForPlanner(enabled)}`,
+      `Scrapers & Actors Catalog:\n${catalogForPlanner(enabled)}`,
+      `Instruction: Select the optimal 1 to 5 scrapers/actors for this campaign based on the ICP, geography, and list focus. You may pick from the catalog or specify dynamic Apify store actors.`,
       input.feedbackNotes
         ? `User feedback to apply: ${input.feedbackNotes}`
         : null,

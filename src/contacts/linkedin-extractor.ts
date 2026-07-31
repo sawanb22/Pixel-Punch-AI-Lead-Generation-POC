@@ -95,6 +95,73 @@ export function extractContactsFromMarkdown(markdown: string): ParsedContact[] {
   return results.sort((a, b) => b.confidence - a.confidence);
 }
 
+export interface GoogleSearchResultItem {
+  title?: string;
+  url?: string;
+  description?: string;
+  snippet?: string;
+  searchQuery?: { term?: string };
+}
+
+/**
+ * Parse a single Google Search result item for a LinkedIn profile.
+ */
+export function parseLinkedInSearchResultItem(
+  item: GoogleSearchResultItem
+): ParsedContact | null {
+  const url = item.url?.trim();
+  if (
+    !url ||
+    !/https?:\/\/(?:[a-z]{2,3}\.)?linkedin\.com\/in\/[a-zA-Z0-9\-_%]+/i.test(url)
+  ) {
+    return null;
+  }
+  const cleanUrl = url.split("?")[0].replace(/\/$/, "");
+
+  let rawTitle = item.title ?? "";
+  // Strip " - LinkedIn", " | LinkedIn", " ... - LinkedIn", etc.
+  rawTitle = rawTitle.replace(/[-|•·]\s*LinkedIn$/i, "").trim();
+
+  // Common titles look like: "Jane Doe - Chief Executive Officer - Acme Corp"
+  // or "Jane Doe | CEO & Founder at Acme"
+  const parts = rawTitle.split(/\s+[-|•·]\s+/);
+
+  let name = parts[0]?.trim() || "";
+  let jobTitle: string | null = parts[1]?.trim() || null;
+
+  if (
+    parts.length > 2 &&
+    jobTitle &&
+    !/CEO|Founder|Director|Manager|President|VP|Head|Owner|Chief/i.test(jobTitle)
+  ) {
+    if (/CEO|Founder|Director|Manager|President|VP|Head|Owner|Chief/i.test(parts[2])) {
+      jobTitle = parts[2].trim();
+    }
+  }
+
+  // Fallback to snippet/description if jobTitle wasn't clearly parsed
+  const snippet = (item.snippet ?? item.description ?? "").trim();
+  if (!jobTitle && snippet) {
+    const titleMatch = snippet.match(
+      /\b(CEO|Founder|Co-Founder|Owner|President|Managing Director|Chief Executive Officer|VP|Head of [A-Z][a-z]+|Marketing Director|Sales Director)\b/i
+    );
+    if (titleMatch) {
+      jobTitle = titleMatch[0];
+    }
+  }
+
+  if (!name || name.length < 2 || name.length > 80 || name.includes("http")) {
+    return null;
+  }
+
+  return {
+    fullName: name,
+    title: jobTitle,
+    linkedinUrl: cleanUrl,
+    confidence: jobTitle ? 0.9 : 0.75,
+  };
+}
+
 /**
  * Extract the LinkedIn company /people page URL from a social links map.
  * social_links is stored as JSON: { linkedin: "https://linkedin.com/company/acme" }

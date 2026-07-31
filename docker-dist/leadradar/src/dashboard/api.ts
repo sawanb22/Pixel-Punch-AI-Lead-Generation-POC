@@ -1656,11 +1656,11 @@ export function createApiRouter(options: ApiOptions): Router {
       }
       const refresh = req.body?.refresh === true;
 
-      // 1. Health check first (requires Jina Reader to scrape LinkedIn people profiles)
+      // 1. Health check first (requires Apify token to search LinkedIn profiles)
       const health = await runProviderHealthCheck({
         fetchFn: enrichFetch ?? globalThis.fetch,
-        checkJina: true,
-        checkApify: false,
+        checkJina: false,
+        checkApify: true,
         checkHermes: false,
       });
 
@@ -1676,8 +1676,8 @@ export function createApiRouter(options: ApiOptions): Router {
 
       // 2. Start running
       const run = createOpsRun(db, { projectId: id, runType: "contacts", status: "running" });
-      addLogToRun(db, { runId: run.id, message: "Jina Reader credentials check passed." });
-      addLogToRun(db, { runId: run.id, message: "Starting contact finding from LinkedIn..." });
+      addLogToRun(db, { runId: run.id, message: "Apify API key check passed." });
+      addLogToRun(db, { runId: run.id, message: "Starting contact finding via Apify..." });
 
       try {
         const summary = await runContactFinding({
@@ -1685,6 +1685,8 @@ export function createApiRouter(options: ApiOptions): Router {
           db,
           projectId: id,
           refresh,
+          apifyClient,
+          env: process.env,
           onProgress: (msg, level) => {
             addLogToRun(db, { runId: run.id, message: msg, level });
           },

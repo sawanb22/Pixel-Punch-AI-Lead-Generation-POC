@@ -5,6 +5,7 @@ export interface ConfidenceInput {
   emailCount: number;
   socialCount: number;
   hasLocation: boolean;
+  hasApifyEnrichment?: boolean;
 }
 
 export function scoreEnrichmentConfidence(input: ConfidenceInput): number {
@@ -18,5 +19,6 @@ export function scoreEnrichmentConfidence(input: ConfidenceInput): number {
   score += Math.min(0.15, input.emailCount * 0.07);
   score += Math.min(0.1, input.socialCount * 0.05);
   if (input.hasLocation) score += 0.05;
+  if (input.hasApifyEnrichment) score += 0.15;
   return Math.max(0.05, Math.min(1, Number(score.toFixed(3))));
 }
