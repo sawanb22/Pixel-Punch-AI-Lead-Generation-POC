@@ -104,13 +104,13 @@ const PACKS: Record<string, SourcePack> = {
       {
         id: "greenhouse-board-template",
         type: "apify",
-        actorId: "curious_coder/greenhouse-job-scraper",
-        discoveryQuery: "{{role}} {{niche}}",
-        input: { query: "{{role}} {{niche}}", maxItems: 50 },
+        actorId: "johnvc/greenhouse-job-board-api",
+        discoveryQuery: "{{role}}",
+        input: { titleKeywords: ["{{role}}"], maxJobs: 50 },
         mapping: {
           companyField: "companyName",
           websiteField: "companyUrl",
-          sourceUrlField: "jobUrl",
+          sourceUrlField: "url",
         },
         allowCompanyOnly: true,
       },
